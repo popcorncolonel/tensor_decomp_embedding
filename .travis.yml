@@ -20,7 +20,7 @@ matrix:
     - python: 3.3
       env:
         - SCIPY_VER="0.8.0"
-        - NUMPY_VER="1.4.1"
+        - NUMPY_VER="1.5"
     - python: 3.3
       env:
         - SCIPY_VER="0.14.0"
@@ -28,14 +28,14 @@ matrix:
     - python: 3.4
       env:
         - SCIPY_VER="0.8.0"
-        - NUMPY_VER="1.4.1"
+        - NUMPY_VER="1.5"
     - python: 3.4
       env:
         - SCIPY_VER="0.14.0"
         - NUMPY_VER="1.9.1"
 before_install:
   - sudo apt-get update -qq
-  - sudo apt-get install -qq libatlas-dev libatlas-base-dev liblapack-dev gfortran
+  - sudo apt-get install -qq libblas-dev liblapack-dev gfortran
   - "sudo rm -rf /dev/shm && sudo ln -s /run/shm /dev/shm"
 install:
   - pip install numpy==$NUMPY_VER
