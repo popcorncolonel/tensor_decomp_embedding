@@ -16,7 +16,7 @@ install:
   - wget http://sourceforge.net/projects/scipy/files/scipy/$SCIPY_VERSION/scipy-$SCIPY_VERSION.tar.gz/download -O scipy-$SCIPY_VERSION.tar.gz
   - tar xzf scipy-$SCIPY_VERSION.tar.gz
   - tar xzf numpy-$NUMPY_VERSION.tar.gz
-  - pip install -q -e ./numpy-$NUMPY_VERSION
-  - pip install -q -e ./scipy-$SCIPY_VERSION
+  - pip install -e ./numpy-$NUMPY_VERSION
+  - pip install -e ./scipy-$SCIPY_VERSION
   - pip install -e .
 script: python setup.py test
