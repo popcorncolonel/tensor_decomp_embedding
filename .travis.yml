@@ -11,27 +11,27 @@ matrix:
         - NUMPY_VERSION="1.9.1"
     - python: 2.7
       env:
-        - SCIPY_VERSION="0.7.0
+        - SCIPY_VERSION="0.7.0"
         - NUMPY_VERSION="1.4.1"
     - python: 2.7
       env:
-        - SCIPY_VERSION="0.14.0
+        - SCIPY_VERSION="0.14.0"
         - NUMPY_VERSION="1.9.1"
     - python: 3.3
       env:
-        - SCIPY_VERSION="0.7.0
+        - SCIPY_VERSION="0.7.0"
         - NUMPY_VERSION="1.4.1"
     - python: 3.3
       env:
-        - SCIPY_VERSION="0.14.0
+        - SCIPY_VERSION="0.14.0"
         - NUMPY_VERSION="1.9.1"
     - python: 3.4
       env:
-        - SCIPY_VERSION="0.7.0
+        - SCIPY_VERSION="0.7.0"
         - NUMPY_VERSION="1.4.1"
     - python: 3.4
       env:
-        - SCIPY_VERSION="0.14.0
+        - SCIPY_VERSION="0.14.0"
         - NUMPY_VERSION="1.9.1"
 before_install:
   - sudo apt-get update -qq
