@@ -37,8 +37,9 @@ class MalletCorpus(LowCorpus):
 
     """
     def __init__(self, fname, id2word=None, metadata=False):
-        self.metadata = metadata
+        self.metadata = False  # currently, LowCorpus doesn't use metadata.
         LowCorpus.__init__(self, fname, id2word)
+        self.metadata = metadata
 
     def _calculate_num_docs(self):
         with utils.smart_open(self.fname) as fin:

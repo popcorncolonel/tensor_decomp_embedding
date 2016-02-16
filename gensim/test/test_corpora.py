@@ -292,6 +292,19 @@ class TestMalletCorpus(CorpusTestCase):
             self.assertEqual(metadata[0], str(i + 1))
             self.assertEqual(metadata[1], 'en')
 
+    def test_load_with_metadata_using_constructor(self):
+        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
+        corpus = self.corpus_class(fname, metadata=True)
+        self.assertEqual(len(corpus), 9)
+
+        docs = list(corpus)
+        self.assertEqual(len(docs), 9)
+
+        for i, docmeta in enumerate(docs):
+            doc, metadata = docmeta
+            self.assertEqual(metadata[0], str(i + 1))
+            self.assertEqual(metadata[1], 'en')
+
 
 class TestTextCorpus(CorpusTestCase):
 
