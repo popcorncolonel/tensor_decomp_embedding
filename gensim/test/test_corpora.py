@@ -60,19 +60,14 @@ class CorpusTestCase(unittest.TestCase):
                 pass
 
     def test_load(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
 
         docs = list(corpus)
         # the deerwester corpus always has nine documents
         self.assertEqual(len(docs), 9)
 
     def test_len(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
-
-        # make sure corpus.index works, too
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
         self.assertEqual(len(corpus), 9)
 
         # for subclasses of IndexedCorpus, we need to nuke this so we don't
@@ -142,8 +137,7 @@ class CorpusTestCase(unittest.TestCase):
                 self.assertEqual(corpus[i], corpus2[i])
 
     def test_switch_id2word(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
         if hasattr(corpus, 'id2word'):
             firstdoc = next(iter(corpus))
             testdoc = set((to_unicode(corpus.id2word[x]), y) for x, y in firstdoc)
@@ -159,8 +153,7 @@ class CorpusTestCase(unittest.TestCase):
             self.assertEqual(testdoc2, set([('computer', 1), ('human', 1), ('interface', 1)]))
 
     def test_indexing(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
         docs = list(corpus)
 
         for idx, doc in enumerate(docs):
@@ -214,7 +207,7 @@ class CorpusTestCase(unittest.TestCase):
 class TestMmCorpus(CorpusTestCase):
     def setUp(self):
         self.corpus_class = mmcorpus.MmCorpus
-        self.file_extension = '.mm'
+        self.test_fname = datapath('testcorpus.mm')
 
     def test_serialize_compressed(self):
         # MmCorpus needs file write with seek => doesn't support compressed output (only input)
@@ -224,13 +217,13 @@ class TestMmCorpus(CorpusTestCase):
 class TestSvmLightCorpus(CorpusTestCase):
     def setUp(self):
         self.corpus_class = svmlightcorpus.SvmLightCorpus
-        self.file_extension = '.svmlight'
+        self.test_fname = datapath('testcorpus.svmlight')
 
 
 class TestBleiCorpus(CorpusTestCase):
     def setUp(self):
         self.corpus_class = bleicorpus.BleiCorpus
-        self.file_extension = '.blei'
+        self.test_fname = datapath('testcorpus.blei')
 
     def test_save_format_for_dtm(self):
         corpus = [[(1, 1.0)], [], [(0, 5.0), (2, 1.0)], []]
@@ -256,7 +249,7 @@ class TestLowCorpus(CorpusTestCase):
 
     def setUp(self):
         self.corpus_class = lowcorpus.LowCorpus
-        self.file_extension = '.low'
+        self.test_fname = datapath('testcorpus.low')
 
 
 class TestUciCorpus(CorpusTestCase):
@@ -264,7 +257,7 @@ class TestUciCorpus(CorpusTestCase):
 
     def setUp(self):
         self.corpus_class = ucicorpus.UciCorpus
-        self.file_extension = '.uci'
+        self.test_fname = datapath('testcorpus.uci')
 
     def test_serialize_compressed(self):
         # UciCorpus needs file write with seek => doesn't support compressed output (only input)
@@ -276,11 +269,10 @@ class TestMalletCorpus(CorpusTestCase):
 
     def setUp(self):
         self.corpus_class = malletcorpus.MalletCorpus
-        self.file_extension = '.mallet'
+        self.test_fname = datapath('testcorpus.mallet')
 
     def test_load_with_metadata(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
         corpus.metadata = True
         self.assertEqual(len(corpus), 9)
 
@@ -293,8 +285,7 @@ class TestMalletCorpus(CorpusTestCase):
             self.assertEqual(metadata[1], 'en')
 
     def test_load_with_metadata_using_constructor(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname, metadata=True)
+        corpus = self.corpus_class(self.test_fname, metadata=True)
         self.assertEqual(len(corpus), 9)
 
         docs = list(corpus)
@@ -310,11 +301,10 @@ class TestTextCorpus(CorpusTestCase):
 
     def setUp(self):
         self.corpus_class = textcorpus.TextCorpus
-        self.file_extension = '.txt'
+        self.test_fname = datapath('testcorpus.txt')
 
     def test_load_with_metadata(self):
-        fname = datapath('testcorpus.' + self.file_extension.lstrip('.'))
-        corpus = self.corpus_class(fname)
+        corpus = self.corpus_class(self.test_fname)
         corpus.metadata = True
         self.assertEqual(len(corpus), 9)
 
