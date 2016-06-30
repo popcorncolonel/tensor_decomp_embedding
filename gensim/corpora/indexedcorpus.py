@@ -18,7 +18,6 @@ of each document.
 """
 
 import logging
-import shelve
 
 import numpy
 
@@ -94,15 +93,15 @@ class IndexedCorpus(interfaces.CorpusABC):
                 offsets = serializer.save_corpus(fname, corpus, id2word, metadata=metadata)
 
         if offsets is None:
-            raise NotImplementedError("called serialize on class %s which doesn't support indexing!" %
-                serializer.__name__)
+            raise NotImplementedError(
+                "called serialize on class %s which doesn't support indexing!" % serializer.__name__)
 
         # store offsets persistently, using pickle
         # we shouldn't have to worry about self.index being a numpy.ndarray as the serializer will return
         # the offsets that are actually stored on disk - we're not storing self.index in any case, the
         # load just needs to turn whatever is loaded from disk back into a ndarray - this should also ensure
         # backwards compatibility
-        logger.info("saving %s index to %s" % (serializer.__name__, index_fname))
+        logger.info("saving %s index to %s", (serializer.__name__, index_fname))
         utils.pickle(offsets, index_fname)
 
     def __len__(self):
@@ -127,7 +126,3 @@ class IndexedCorpus(interfaces.CorpusABC):
             return self.docbyoffset(self.index[docno])
         else:
             raise ValueError('Unrecognised value for docno, use either a single integer, a slice or a numpy.ndarray')
-
-
-
-# endclass IndexedCorpus

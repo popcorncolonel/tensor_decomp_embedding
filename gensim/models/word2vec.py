@@ -1432,8 +1432,8 @@ class Word2Vec(utils.SaveLoad):
         This method corresponds to the `compute-accuracy` script of the original C word2vec.
 
         """
-        ok_vocab = dict(sorted(iteritems(self.vocab),
-                               key=lambda item: -item[1].count)[:restrict_vocab])
+        ok_vocab = sorted(iteritems(self.vocab), key=lambda item: -item[1].count)
+        ok_vocab = dict(ok_vocab[:restrict_vocab])
         ok_index = set(v.index for v in itervalues(ok_vocab))
 
         sections, section = [], None

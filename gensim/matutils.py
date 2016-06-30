@@ -390,25 +390,24 @@ def qr_destroy(la):
     because the memory used in `la[0]` is reclaimed earlier.
     """
     a = numpy.asfortranarray(la[0])
-    del la[0], la # now `a` is the only reference to the input matrix
+    del la[0], la  # now `a` is the only reference to the input matrix
     m, n = a.shape
     # perform q, r = QR(a); code hacked out of scipy.linalg.qr
     logger.debug("computing QR of %s dense matrix" % str(a.shape))
     geqrf, = get_lapack_funcs(('geqrf',), (a,))
     qr, tau, work, info = geqrf(a, lwork=-1, overwrite_a=True)
     qr, tau, work, info = geqrf(a, lwork=work[0], overwrite_a=True)
-    del a # free up mem
+    del a  # free up mem
     assert info >= 0
     r = triu(qr[:n, :n])
-    if m < n: # rare case, #features < #topics
-        qr = qr[:, :m] # retains fortran order
+    if m < n:  # rare case, #features < #topics
+        qr = qr[:, :m]  # retains fortran order
     gorgqr, = get_lapack_funcs(('orgqr',), (qr,))
     q, work, info = gorgqr(qr, tau, lwork=-1, overwrite_a=True)
     q, work, info = gorgqr(qr, tau, lwork=work[0], overwrite_a=True)
     assert info >= 0, "qr failed"
     assert q.flags.f_contiguous
     return q, r
-
 
 
 class MmWriter(object):
@@ -427,15 +426,14 @@ class MmWriter(object):
 
     """
 
-    HEADER_LINE = b'%%MatrixMarket matrix coordinate real general\n' # the only supported MM format
+    HEADER_LINE = b'%%MatrixMarket matrix coordinate real general\n'  # the only supported MM format
 
     def __init__(self, fname):
         self.fname = fname
         if fname.endswith(".gz") or fname.endswith('.bz2'):
             raise NotImplementedError("compressed output not supported with MmWriter")
-        self.fout = utils.smart_open(self.fname, 'wb+') # open for both reading and writing
+        self.fout = utils.smart_open(self.fname, 'wb+')  # open for both reading and writing
         self.headers_written = False
-
 
     def write_headers(self, num_docs, num_terms, num_nnz):
         self.fout.write(MmWriter.HEADER_LINE)
@@ -443,14 +441,14 @@ class MmWriter(object):
         if num_nnz < 0:
             # we don't know the matrix shape/density yet, so only log a general line
             logger.info("saving sparse matrix to %s" % self.fname)
-            self.fout.write(utils.to_utf8(' ' * 50 + '\n')) # 48 digits must be enough for everybody
+            self.fout.write(utils.to_utf8(' ' * 50 + '\n'))  # 48 digits must be enough for everybody
         else:
-            logger.info("saving sparse %sx%s matrix with %i non-zero entries to %s" %
-                         (num_docs, num_terms, num_nnz, self.fname))
+            logger.info(
+                "saving sparse %sx%s matrix with %i non-zero entries to %s",
+                num_docs, num_terms, num_nnz, self.fname)
             self.fout.write(utils.to_utf8('%s %s %s\n' % (num_docs, num_terms, num_nnz)))
         self.last_docno = -1
         self.headers_written = True
-
 
     def fake_headers(self, num_docs, num_terms, num_nnz):
         stats = '%i %i %i' % (num_docs, num_terms, num_nnz)
@@ -458,7 +456,6 @@ class MmWriter(object):
             raise ValueError('Invalid stats: matrix too large!')
         self.fout.seek(len(MmWriter.HEADER_LINE))
         self.fout.write(utils.to_utf8(stats))
-
 
     def write_vector(self, docno, vector):
         """
@@ -468,12 +465,11 @@ class MmWriter(object):
         """
         assert self.headers_written, "must write Matrix Market file headers before writing data!"
         assert self.last_docno < docno, "documents %i and %i not in sequential order!" % (self.last_docno, docno)
-        vector = sorted((i, w) for i, w in vector if abs(w) > 1e-12) # ignore near-zero entries
-        for termid, weight in vector: # write term ids in sorted order
-            self.fout.write(utils.to_utf8("%i %i %s\n" % (docno + 1, termid + 1, weight))) # +1 because MM format starts counting from 1
+        vector = sorted((i, w) for i, w in vector if abs(w) > 1e-12)  # ignore near-zero entries
+        for termid, weight in vector:  # write term ids in sorted order
+            self.fout.write(utils.to_utf8("%i %i %s\n" % (docno + 1, termid + 1, weight)))  # +1 because MM format starts counting from 1
         self.last_docno = docno
         return (vector[-1][0], len(vector)) if vector else (-1, 0)
-
 
     @staticmethod
     def write_corpus(fname, corpus, progress_cnt=1000, index=False, num_terms=None, metadata=False):
@@ -486,7 +482,7 @@ class MmWriter(object):
         mw = MmWriter(fname)
 
         # write empty headers to the file (with enough space to be overwritten later)
-        mw.write_headers(-1, -1, -1) # will print 50 spaces followed by newline on the stats line
+        mw.write_headers(-1, -1, -1)  # will print 50 spaces followed by newline on the stats line
 
         # calculate necessary header info (nnz elements, num terms, num docs) while writing out vectors
         _num_terms, num_nnz = 0, 0
@@ -506,7 +502,7 @@ class MmWriter(object):
             else:
                 bow = doc
             if docno % progress_cnt == 0:
-                logger.info("PROGRESS: saving document #%i" % docno)
+                logger.info("PROGRESS: saving document #%i", docno)
             if index:
                 posnow = mw.fout.tell()
                 if posnow == poslast:
@@ -524,11 +520,12 @@ class MmWriter(object):
         num_terms = num_terms or _num_terms
 
         if num_docs * num_terms != 0:
-            logger.info("saved %ix%i matrix, density=%.3f%% (%i/%i)" % (
+            logger.info(
+                "saved %ix%i matrix, density=%.3f%% (%i/%i)",
                 num_docs, num_terms,
                 100.0 * num_nnz / (num_docs * num_terms),
                 num_nnz,
-                num_docs * num_terms))
+                num_docs * num_terms)
 
         # now write proper headers, by seeking and overwriting the spaces written earlier
         mw.fake_headers(num_docs, num_terms, num_nnz)
@@ -536,7 +533,6 @@ class MmWriter(object):
         mw.close()
         if index:
             return offsets
-
 
     def __del__(self):
         """
@@ -546,15 +542,13 @@ class MmWriter(object):
         to work! Closing the file explicitly via the close() method is preferred
         and safer.
         """
-        self.close() # does nothing if called twice (on an already closed file), so no worries
-
+        self.close()  # does nothing if called twice (on an already closed file), so no worries
 
     def close(self):
         logger.debug("closing %s" % self.fname)
         if hasattr(self, 'fout'):
             self.fout.close()
 #endclass MmWriter
-
 
 
 class MmReader(object):
@@ -597,8 +591,9 @@ class MmReader(object):
                         self.num_docs, self.num_terms = self.num_terms, self.num_docs
                     break
 
-        logger.info("accepted corpus with %i documents, %i features, %i non-zero entries" %
-                     (self.num_docs, self.num_terms, self.num_nnz))
+        logger.info(
+            "accepted corpus with %i documents, %i features, %i non-zero entries",
+            self.num_docs, self.num_terms, self.num_nnz)
 
     def __len__(self):
         return self.num_docs
@@ -634,7 +629,7 @@ class MmReader(object):
                 docid, termid, val = utils.to_unicode(line).split()  # needed for python3
                 if not self.transposed:
                     termid, docid = docid, termid
-                docid, termid, val = int(docid) - 1, int(termid) - 1, float(val) # -1 because matrix market indexes are 1-based => convert to 0-based
+                docid, termid, val = int(docid) - 1, int(termid) - 1, float(val)  # -1 because matrix market indexes are 1-based => convert to 0-based
                 assert previd <= docid, "matrix columns must come in ascending order"
                 if docid != previd:
                     # change of document: return the document read so far (its id is prevId)
@@ -650,7 +645,7 @@ class MmReader(object):
                     previd = docid
                     document = []
 
-                document.append((termid, val,)) # add another field to the current document
+                document.append((termid, val,))  # add another field to the current document
 
         # handle the last document, as a special case
         if previd >= 0:
@@ -660,7 +655,6 @@ class MmReader(object):
         # of documents as specified in the header
         for previd in xrange(previd + 1, self.num_docs):
             yield previd, []
-
 
     def docbyoffset(self, offset):
         """Return document at file offset `offset` (in bytes)"""
@@ -673,19 +667,19 @@ class MmReader(object):
         else:
             fin = self.input
 
-        fin.seek(offset) # works for gzip/bz2 input, too
+        fin.seek(offset)  # works for gzip/bz2 input, too
         previd, document = -1, []
         for line in fin:
             docid, termid, val = line.split()
             if not self.transposed:
                 termid, docid = docid, termid
-            docid, termid, val = int(docid) - 1, int(termid) - 1, float(val) # -1 because matrix market indexes are 1-based => convert to 0-based
+            docid, termid, val = int(docid) - 1, int(termid) - 1, float(val)  # -1 because matrix market indexes are 1-based => convert to 0-based
             assert previd <= docid, "matrix columns must come in ascending order"
             if docid != previd:
                 if previd >= 0:
                     return document
                 previd = docid
 
-            document.append((termid, val,)) # add another field to the current document
+            document.append((termid, val,))  # add another field to the current document
         return document
 #endclass MmReader

@@ -600,17 +600,17 @@ class LdaModel(interfaces.TransformationABC):
         evalafter = min(lencorpus, (eval_every or 0) * self.numworkers * chunksize)
 
         updates_per_pass = max(1, lencorpus / updateafter)
-        logger.info("running %s LDA training, %s topics, %i passes over "
-                    "the supplied corpus of %i documents, updating model once "
-                    "every %i documents, evaluating perplexity every %i documents, "
-                    "iterating %ix with a convergence threshold of %f",
-                    updatetype, self.num_topics, passes, lencorpus,
-                        updateafter, evalafter, iterations,
-                        gamma_threshold)
+        logger.info(
+            "running %s LDA training, %s topics, %i passes over "
+            "the supplied corpus of %i documents, updating model once "
+            "every %i documents, evaluating perplexity every %i documents, "
+            "iterating %ix with a convergence threshold of %f",
+            updatetype, self.num_topics, passes, lencorpus, updateafter, evalafter,
+            iterations, gamma_threshold)
 
         if updates_per_pass * passes < 10:
-            logger.warning("too few updates, training might not converge; consider "
-                           "increasing the number of passes or iterations to improve accuracy")
+            logger.warning(
+                "too few updates, training might not converge; consider increasing the number of passes or iterations to improve accuracy")
 
         # rho is the "speed" of updating; TODO try other fncs
         # pass_ + num_updates handles increasing the starting t for each pass,
