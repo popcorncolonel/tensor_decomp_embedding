@@ -664,7 +664,8 @@ class RepeatCorpusNTimes(SaveLoad):
         self.n = n
 
     def __iter__(self):
-        for _ in xrange(self.n):
+        for i in xrange(self.n):
+            print('starting iteration {}'.format(i))
             for document in self.corpus:
                 yield document
 

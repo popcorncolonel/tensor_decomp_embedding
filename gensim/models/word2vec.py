@@ -91,8 +91,6 @@ from numpy import exp, log, dot, zeros, outer, random, dtype, float32 as REAL,\
 
 from scipy.special import expit
 
-from scipy.special import expit
-
 from gensim import utils, matutils  # utility fnc for pickling, common scipy operations etc
 from gensim.corpora.dictionary import Dictionary
 from six import iteritems, itervalues, string_types
@@ -101,12 +99,19 @@ from types import GeneratorType
 
 logger = logging.getLogger(__name__)
 
+import numpy
+import pyximport
+pyximport.install(setup_args={
+                          "include_dirs":numpy.get_include()},
+              reload_support=True)
 
 try:
+    raise ImportError ################ TODO: REMOVE THIS
     from gensim.models.word2vec_inner import train_batch_sg, train_batch_cbow
     from gensim.models.word2vec_inner import score_sentence_sg, score_sentence_cbow
     from gensim.models.word2vec_inner import FAST_VERSION, MAX_WORDS_IN_BATCH
-except ImportError:
+except ImportError as E:
+    print(E)
     # failed... fall back to plain numpy (20-80x slower training than the above)
     # Can't log here because logger is usually not configured at import time
     FAST_VERSION = -1
@@ -277,8 +282,18 @@ def train_sg_pair(model, word, context_index, alpha, learn_vectors=True, learn_h
         l1 += neu1e * lock_factor  # learn input -> hidden (mutates model.syn0[word2.index], if that is l1)
     return neu1e
 
-
 def train_cbow_pair(model, word, input_word_indices, l1, alpha, learn_vectors=True, learn_hidden=True):
+    '''
+    word: 
+    input_word_indices: indices in the table (what table?) to update the vectors for.
+    l1: layer 1. this is the averaged/summed context.
+
+    TODO (questions to answer):
+        -neu1e - what is it and what is it used for? "neuron 1 error"?
+        -model.syn1 - what is it and what is it used for?
+        -model.syn1neg - what is it and what is it used for?
+        -model.neg_labels - a `negative`x1 vector of [1, 0, 0, 0, ...]
+    '''
     neu1e = zeros(l1.shape)
 
     if model.hs:
@@ -800,9 +815,12 @@ class Word2Vec(utils.SaveLoad):
                     progress_queue.put(None)
                     break  # no more jobs => quit this worker
                 sentences, alpha = job
+                print('trainin')
                 tally, raw_tally = self._do_train_job(sentences, alpha, (work, neu1))
+                print('trained it up')
                 progress_queue.put((len(sentences), tally, raw_tally))  # report back progress
                 jobs_processed += 1
+                print('completed job {}'.format(jobs_processed))
             logger.debug("worker exiting, processed %i jobs", jobs_processed)
 
         def job_producer():
@@ -1786,8 +1804,9 @@ class Word2Vec(utils.SaveLoad):
 
 class BrownCorpus(object):
     """Iterate over sentences from the Brown corpus (part of NLTK data)."""
-    def __init__(self, dirname):
+    def __init__(self, dirname, include_tags=True):
         self.dirname = dirname
+        self.include_tags = include_tags
 
     def __iter__(self):
         for fname in os.listdir(self.dirname):
@@ -1800,7 +1819,10 @@ class BrownCorpus(object):
                 # each token is WORD/POS_TAG
                 token_tags = [t.split('/') for t in line.split() if len(t.split('/')) == 2]
                 # ignore words with non-alphabetic tags like ",", "!" etc (punctuation, weird stuff)
-                words = ["%s/%s" % (token.lower(), tag[:2]) for token, tag in token_tags if tag[:2].isalpha()]
+                if self.include_tags:
+                    words = ["%s/%s" % (token.lower(), tag[:2]) for token, tag in token_tags if tag[:2].isalpha()]
+                else:
+                    words = ["%s" % (token.lower()) for token, _ in token_tags]
                 if not words:  # don't bother sending out empty sentences
                     continue
                 yield words
