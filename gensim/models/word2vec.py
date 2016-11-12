@@ -144,6 +144,33 @@ except ImportError as E:
             result += len(word_vocabs)
         return result
 
+
+    def train_batch_cnn(model, sentences, alpha):
+        result = 0
+        for sentence in sentences:
+            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab and
+                           model.vocab[w].sample_int > model.random.rand() * 2**32]
+            word_matrix = zeros(shape=(2 * model.window - 1, len(model.vocab))) # `model.window` words before and after the target word. -1 because not including the word itself.
+            for pos, word in enumerate(word_vocabs):
+                # `word` is the word we're trying to predict
+                start = pos - model.window
+                window_pos = []
+                for i in range(start, pos + model.window + 1):
+                    if 0 <= i < len(word_vocabs):
+                        window_pos.append((i - start, word_vocabs[i]))
+                    else:
+                        window_pos.append((i - start, None))
+
+                # `word2_indices` = list of context word indices
+                for matrix_index, word_vocab in window_pos:
+                    if word_vocab is not None:
+                        word_matrix[matrix_index][word_vocab.index] += 1.
+
+                train_cnn_pair(model, word, word_matrix, alpha)
+            result += len(word_vocabs)
+        return result
+
+
     def train_batch_cbow(model, sentences, alpha, work=None, neu1=None):
         """
         Update CBOW model by training on a sequence of sentences.
@@ -238,6 +265,18 @@ try:
     PYEMD_EXT = True
 except ImportError:
     PYEMD_EXT = False
+
+def train_cnn_pair(model, word, word_matrix, alpha, learn_vectors=True, learn_hidden=True):
+    '''
+
+    :param model:
+    :param word:
+    :param word_matrix: C x |V| matrix. word_matrix[i] is the zero vector (in R^|V|) if it is OOV or the context goes over the range of the sentence.
+    :param alpha:
+    :param learn_vectors:
+    :param learn_hidden:
+    '''
+    pass
 
 def train_sg_pair(model, word, context_index, alpha, learn_vectors=True, learn_hidden=True,
                   context_vectors=None, context_locks=None):
@@ -373,7 +412,7 @@ class Word2Vec(utils.SaveLoad):
             self, sentences=None, size=100, alpha=0.025, window=5, min_count=5,
             max_vocab_size=None, sample=1e-3, seed=1, workers=3, min_alpha=0.0001,
             sg=0, hs=0, negative=5, cbow_mean=1, hashfxn=hash, iter=5, null_word=0,
-            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH):
+            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, cnn=0):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -452,6 +491,7 @@ class Word2Vec(utils.SaveLoad):
         self.vocab = {}  # mapping from a word (string) to a Vocab object
         self.index2word = []  # map from a word's matrix index (int) to word (string)
         self.sg = int(sg)
+        self.cnn = int(cnn)
         self.cum_table = None  # for negative sampling
         self.vector_size = int(size)
         self.layer1_size = int(size)
@@ -748,6 +788,8 @@ class Word2Vec(utils.SaveLoad):
         """
         work, neu1 = inits
         tally = 0
+        if self.cnn:
+            tally += train_batch_cnn(self, sentences, alpha)
         if self.sg:
             tally += train_batch_sg(self, sentences, alpha, work)
         else:
