@@ -19,20 +19,21 @@ class EmbeddingCNN(object):
         embedding_size,
         filter_sizes,
         num_filters,
-        context_size,  # 2 * vocab_model.window
+        context_size,  # = 2 * vocab_model.window
     ):
+        self.vocab_model = vocab_model
+
         with tf.Graph().as_default():
             self.sess = tf.Session()
             with self.sess.as_default():
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
-                self.input_y = tf.placeholder(tf.int32, [None], name='input_y')  # Index of correct word. (list for minibatching)
+                self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y')  # Index of correct word. (list for minibatching)
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
                 self.create_embedding_layer(vocab_model, embedding_size)
                 self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
                 self.create_fully_connected_layer(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
-                self.create_objective_fn()
-                self.create_loss_fn()
-        self.vocab_model = vocab_model
+                #self.create_objective_fn()
+                #self.create_loss_fn()
 
 
     def write_graph(self):
@@ -86,7 +87,8 @@ class EmbeddingCNN(object):
         with tf.name_scope('output'):
             W = tf.Variable(
                 tf.truncated_normal(
-                    shape=[num_filters_total, len(vocab_model.vocab)],
+                    #shape=[num_filters_total, len(vocab_model.vocab)],
+                    shape=[len(vocab_model.vocab), num_filters_total],
                     stddev=0.1
                 ),
                 name='W',
@@ -95,8 +97,17 @@ class EmbeddingCNN(object):
                 tf.constant(0.1, shape=[len(vocab_model.vocab)]),
                 name='b'
             )
-            self.scores = tf.matmul(self.h_drop, W) + b
-            self.predictions = tf.argmax(self.scores, 1, name='predictions')
+            #self.scores = tf.matmul(self.h_drop, W) + b
+            #self.predictions = tf.argmax(self.scores, 1, name='predictions')
+            with tf.name_scope('loss'):
+                self.loss = tf.nn.sampled_softmax_loss(
+                    weights=W,
+                    biases=b,
+                    inputs=self.h_drop,
+                    labels=self.input_y,
+                    num_sampled=self.vocab_model.negative,
+                    num_classes=len(vocab_model.vocab),
+                )
 
     def create_objective_fn(self):
         # negative sampling
@@ -118,8 +129,9 @@ class EmbeddingCNN(object):
             self.objective = tf.add(positive_logsum, negative_logsum, name='neg_sample_score')
 
     def create_loss_fn(self):
-        with tf.name_scope('loss'):
-            self.loss = -self.objective()
+        pass
+        #with tf.name_scope('loss'):
+        #    self.loss = -self.objective()
 
     def create_accuracy(self):
         # TODO: accuracy. Make it analogy accuracy? Or % negative sampling correct?
