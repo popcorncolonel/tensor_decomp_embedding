@@ -145,26 +145,39 @@ except ImportError as E:
         return result
 
 
+    def get_context_matrix(model, word_vocabs, word_index):
+        # word_vocabs is a list of vocabs corresponding to sentence indices
+        word_matrix = zeros(shape=(2 * model.window, len(model.vocab)))  # `model.window` words before and after the target word. -1 because not including the word itself.
+        start = word_index - model.window
+        window_pos = []
+        for i in range(start, word_index + model.window + 1):
+            if i == word_index:
+                continue
+            if 0 <= i < len(word_vocabs):
+                window_pos.append(word_vocabs[i])
+            else:
+                window_pos.append(None)
+
+        # `word2_indices` = list of context word indices
+        last_index = None
+        for matrix_index, word_vocab in enumerate(window_pos):
+            if word_vocab is not None:
+                word_matrix[matrix_index][word_vocab.index] += 1.
+            last_index = matrix_index
+        assert last_index == 2 * model.window - 1
+        return word_matrix
+
+
     def train_batch_cnn(model, sentences, alpha):
         result = 0
         for sentence in sentences:
-            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab and
-                           model.vocab[w].sample_int > model.random.rand() * 2**32]
-            word_matrix = zeros(shape=(2 * model.window - 1, len(model.vocab))) # `model.window` words before and after the target word. -1 because not including the word itself.
+            #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
+            #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
+            #TODO: replace with UNK token? could do experiments.
+            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
             for pos, word in enumerate(word_vocabs):
                 # `word` is the word we're trying to predict
-                start = pos - model.window
-                window_pos = []
-                for i in range(start, pos + model.window + 1):
-                    if 0 <= i < len(word_vocabs):
-                        window_pos.append((i - start, word_vocabs[i]))
-                    else:
-                        window_pos.append((i - start, None))
-
-                # `word2_indices` = list of context word indices
-                for matrix_index, word_vocab in window_pos:
-                    if word_vocab is not None:
-                        word_matrix[matrix_index][word_vocab.index] += 1.
+                word_matrix = get_context_matrix(model, word_vocabs, pos)
 
                 train_cnn_pair(model, word, word_matrix, alpha)
             result += len(word_vocabs)
@@ -790,7 +803,7 @@ class Word2Vec(utils.SaveLoad):
         tally = 0
         if self.cnn:
             tally += train_batch_cnn(self, sentences, alpha)
-        if self.sg:
+        elif self.sg:
             tally += train_batch_sg(self, sentences, alpha, work)
         else:
             tally += train_batch_cbow(self, sentences, alpha, work, neu1)
@@ -1133,6 +1146,8 @@ class Word2Vec(utils.SaveLoad):
 
         # do not suppress learning for already learned words
         self.syn0_lockf = ones(len(self.vocab), dtype=REAL)  # zeros suppress learning
+        if self.cnn:
+            pass # TODO: do this
 
     def reset_weights(self):
         """Reset all projection weights to an initial (untrained) state, but keep the existing vocabulary."""
