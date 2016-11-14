@@ -146,6 +146,7 @@ except ImportError as E:
 
 
     def get_context_matrix(model, word_vocabs, word_index):
+        # `word_index` is the index in word_vocabs where the target word appears.
         # word_vocabs is a list of vocabs corresponding to sentence indices
         word_matrix = zeros(shape=(2 * model.window, len(model.vocab)))  # `model.window` words before and after the target word. -1 because not including the word itself.
         start = word_index - model.window
@@ -168,8 +169,13 @@ except ImportError as E:
         return word_matrix
 
 
-    def train_batch_cnn(model, sentences, alpha):
-        result = 0
+    def get_target_y(word_vocabs, word_index):
+        return word_vocabs[word_index].index
+
+
+    def cnn_batch_generator(model, sentences, batch_size=128):
+        #result = 0
+        batch = []
         for sentence in sentences:
             #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
             #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
@@ -178,10 +184,15 @@ except ImportError as E:
             for pos, word in enumerate(word_vocabs):
                 # `word` is the word we're trying to predict
                 word_matrix = get_context_matrix(model, word_vocabs, pos)
+                target_y = get_target_y(word_vocabs, pos)
+                batch.append((word_matrix, target_y))
+                if len(batch) == batch_size:
+                    yield batch
+                    batch = []
 
-                train_cnn_pair(model, word, word_matrix, alpha)
-            result += len(word_vocabs)
-        return result
+                #train_cnn_pair(model, word, word_matrix, alpha)
+            #result += len(word_vocabs)
+        #return result
 
 
     def train_batch_cbow(model, sentences, alpha, work=None, neu1=None):

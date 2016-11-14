@@ -1,7 +1,10 @@
+import datetime
 import tensorflow as tf
 import numpy as np
-from scipy.special import expit
+import time
+import os
 
+from scipy.special import expit
 
 
 class EmbeddingCNN(object):
@@ -23,21 +26,22 @@ class EmbeddingCNN(object):
     ):
         self.vocab_model = vocab_model
 
-        with tf.Graph().as_default():
-            self.sess = tf.Session()
-            with self.sess.as_default():
-                self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
-                self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y')  # Index of correct word. (list for minibatching)
-                self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
-                self.create_embedding_layer(vocab_model, embedding_size)
-                self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
-                self.create_fully_connected_layer_and_loss_fn(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
-                #self.create_objective_fn()
-                #self.create_loss_fn()
+        #with tf.Graph().as_default():
+        self.sess = tf.Session()
+        with self.sess.as_default():
+            self.input_x = tf.placeholder(tf.int32, [None, context_size, len(vocab_model.vocab)], name='input_x')
+            self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y')  # Index of correct word. (list for minibatching)
+            self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
+            self.create_embedding_layer(vocab_model, embedding_size)
+            self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
+            self.create_fully_connected_layer_and_loss_fn(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
+            #self.create_objective_fn()
+            #self.create_loss_fn()
+
 
 
     def write_graph(self):
-        writer = tf.train.SummaryWriter('/tmp/tf_logs', graph=self.sess.graph)
+        tf.train.SummaryWriter('/tmp/tf_logs', graph=self.sess.graph)
 
     def create_embedding_layer(self, vocab_model, embedding_size):
         with tf.name_scope('embedding'):
@@ -115,4 +119,88 @@ class EmbeddingCNN(object):
     def create_accuracy(self):
         # TODO: accuracy. Make it analogy accuracy? Or % negative sampling correct?
         pass
+
+    def train_step(self, x_batch, y_batch, dropout_keep_prob=.5):
+        feed_dict = {
+            self.input_x: x_batch,
+            self.input_y: y_batch,
+            self.dropout_keep_prob: dropout_keep_prob,
+        }
+        _, step, summaries, loss = self.sess.run(
+            [
+                self.train_op,
+                self.global_step,
+                self.loss_summary,
+                self.loss,
+            ],
+            feed_dict=feed_dict
+        )
+        time_str = datetime.datetime.now().isoformat()
+        print("{}: step {}, loss {:g}".format(time_str, step, loss))
+        self.train_summary_writer.add_summary(summaries, step)
+
+    def dev_step(self, x_batch, y_batch):
+        feed_dict = {
+            self.input_x: x_batch,
+            self.input_y: y_batch,
+            self.dropout_keep_prob: 1.0,
+        }
+        step, summaries, loss = self.sess.run(
+            [
+                self.global_step,
+                self.loss_summary,
+                self.loss,
+            ],
+            feed_dict=feed_dict
+        )
+        time_str = datetime.datetime.now().isoformat()
+        print("(dev) {}: step {}, loss {:g}".format(time_str, step, loss))
+        self.dev_summary_writer.add_summary(summaries, step)
+
+    def get_next_batch(self, sentences, num_iterations=5):
+        batch = []
+        if self.sent_index >= len(sentences):
+            return None
+
+
+
+    def train(self, batches):
+        with self.sess.as_default():
+            ######## Misc housekeeping ###########
+            timestamp = str(int(time.time()))
+            out_dir = os.path.abspath(os.path.join(os.path.curdir, 'tf', timestamp))
+            print('Writing summaries to {}.'.format(out_dir))
+
+            self.loss_summary = tf.scalar_summary('loss', self.loss)
+            self.train_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph_def)
+            self.dev_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph_def)
+
+            checkpoint_dir = os.path.abspath(os.path.join(out_dir, 'checkpoints'))
+            checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
+
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+            self.saver = tf.train.Saver(tf.all_variables())
+            ######## /Misc housekeeping ###########
+
+            self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+            grads_and_vars = optimizer.compute_gradients(self.loss)
+            self.train_op = optimizer.apply_gradients(grads_and_vars, self.global_step)
+
+            self.sess.run(tf.initialize_all_variables())
+            # TODO: look into using pre-trained values for our first word embedding.
+
+            self.word_index = 0
+            self.sent_index = 0
+            for batch in batches:
+                x_batch, y_batch = zip(*batch)
+                self.train_step(x_batch, y_batch)
+                current_step = tf.train.global_step(self.sess, self.global_step)
+                if current_step % 100 == 0:
+                    print("\nEvaluation: ")
+                    self.dev_step(x_batch, y_batch)
+                if current_step % 100 == 0:
+                    path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
+                    print('Saved model checkpoint to {}'.format(path))
 
