@@ -1,5 +1,7 @@
 import tensorflow as tf
 import numpy as np
+from scipy.special import expit
+
 
 
 class EmbeddingCNN(object):
@@ -23,11 +25,17 @@ class EmbeddingCNN(object):
             self.sess = tf.Session()
             with self.sess.as_default():
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
-                self.input_y = tf.placeholder(tf.float32, [None, len(vocab_model.vocab)], name='input_y')
+                self.input_y = tf.placeholder(tf.int32, [None], name='input_y')  # Index of correct word. (list for minibatching)
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
                 self.create_embedding_layer(vocab_model, embedding_size)
                 self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
                 self.create_fully_connected_layer(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
+                self.create_objective_fn()
+                self.create_loss_fn()
+        self.vocab_model = vocab_model
+
+
+    def write_graph(self):
         writer = tf.train.SummaryWriter('/tmp/tf_logs', graph=self.sess.graph)
 
     def create_embedding_layer(self, vocab_model, embedding_size):
@@ -90,9 +98,30 @@ class EmbeddingCNN(object):
             self.scores = tf.matmul(self.h_drop, W) + b
             self.predictions = tf.argmax(self.scores, 1, name='predictions')
 
-    def loss(self):
-        pass
+    def create_objective_fn(self):
+        # negative sampling
+        # maximize log(correct output) + sum_{wj in W_neg} log(-output of wj)
+        # TODO: is this differentiable? Will this mess up the optimizer? \O_o/ let's just try it
 
-    def accuracy(self):
+        with tf.name_scope('objective'):
+            neg_word_indices = []
+            negative_logsum = tf.Variable(0, dtype=tf.float32, name='negative_logsum')
+            positive_logsum = tf.Variable(0, dtype=tf.float32, name='positive_logsum')
+            for minibatch_scores in self.scores:
+                while len(neg_word_indices) < self.vocab_model.negative:
+                    w = self.vocab_model.cum_table.searchsorted(self.vocab_model.random.randint(self.vocab_model.cum_table[-1]))
+                    if w != self.input_y:
+                        neg_word_indices.append(w)
+                for neg_index in neg_word_indices:
+                    negative_logsum = tf.add(negative_logsum, tf.log(-minibatch_scores[neg_index]))
+                positive_logsum = tf.add(positive_logsum, tf.log(minibatch_scores[self.input_y]))
+            self.objective = tf.add(positive_logsum, negative_logsum, name='neg_sample_score')
+
+    def create_loss_fn(self):
+        with tf.name_scope('loss'):
+            self.loss = -self.objective()
+
+    def create_accuracy(self):
+        # TODO: accuracy. Make it analogy accuracy? Or % negative sampling correct?
         pass
 
