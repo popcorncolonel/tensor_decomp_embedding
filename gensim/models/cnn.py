@@ -31,7 +31,7 @@ class EmbeddingCNN(object):
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
                 self.create_embedding_layer(vocab_model, embedding_size)
                 self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
-                self.create_fully_connected_layer(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
+                self.create_fully_connected_layer_and_loss_fn(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
                 #self.create_objective_fn()
                 #self.create_loss_fn()
 
@@ -81,7 +81,7 @@ class EmbeddingCNN(object):
         # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
         self.h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total], name='h_pool_flat')
 
-    def create_fully_connected_layer(self, num_filters_total, vocab_model):
+    def create_fully_connected_layer_and_loss_fn(self, num_filters_total, vocab_model):
         with tf.name_scope('dropout'):
             self.h_drop = tf.nn.dropout(self.h_pool_flat, self.dropout_keep_prob)
         with tf.name_scope('output'):
@@ -99,39 +99,18 @@ class EmbeddingCNN(object):
             )
             #self.scores = tf.matmul(self.h_drop, W) + b
             #self.predictions = tf.argmax(self.scores, 1, name='predictions')
-            with tf.name_scope('loss'):
-                self.loss = tf.nn.sampled_softmax_loss(
-                    weights=W,
-                    biases=b,
-                    inputs=self.h_drop,
-                    labels=self.input_y,
-                    num_sampled=self.vocab_model.negative,
-                    num_classes=len(vocab_model.vocab),
-                )
+        self.create_loss_fn(W, b, vocab_model)
 
-    def create_objective_fn(self):
-        # negative sampling
-        # maximize log(correct output) + sum_{wj in W_neg} log(-output of wj)
-        # TODO: is this differentiable? Will this mess up the optimizer? \O_o/ let's just try it
-
-        with tf.name_scope('objective'):
-            neg_word_indices = []
-            negative_logsum = tf.Variable(0, dtype=tf.float32, name='negative_logsum')
-            positive_logsum = tf.Variable(0, dtype=tf.float32, name='positive_logsum')
-            for minibatch_scores in self.scores:
-                while len(neg_word_indices) < self.vocab_model.negative:
-                    w = self.vocab_model.cum_table.searchsorted(self.vocab_model.random.randint(self.vocab_model.cum_table[-1]))
-                    if w != self.input_y:
-                        neg_word_indices.append(w)
-                for neg_index in neg_word_indices:
-                    negative_logsum = tf.add(negative_logsum, tf.log(-minibatch_scores[neg_index]))
-                positive_logsum = tf.add(positive_logsum, tf.log(minibatch_scores[self.input_y]))
-            self.objective = tf.add(positive_logsum, negative_logsum, name='neg_sample_score')
-
-    def create_loss_fn(self):
-        pass
-        #with tf.name_scope('loss'):
-        #    self.loss = -self.objective()
+    def create_loss_fn(self, fc_W, fc_b, vocab_model):
+        with tf.name_scope('loss'):
+            self.loss = tf.nn.sampled_softmax_loss(
+                weights=fc_W,
+                biases=fc_b,
+                inputs=self.h_drop,
+                labels=self.input_y,
+                num_sampled=self.vocab_model.negative,
+                num_classes=len(vocab_model.vocab),
+            )
 
     def create_accuracy(self):
         # TODO: accuracy. Make it analogy accuracy? Or % negative sampling correct?
