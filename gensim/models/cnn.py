@@ -28,7 +28,7 @@ class EmbeddingCNN(object):
 
         #with tf.Graph().as_default():
         self.sess = tf.Session()
-        with self.sess.as_default(), tf.device('/gpu:1'):
+        with self.sess.as_default(), tf.device('/gpu:0'):
             self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
             self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
             self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
@@ -104,7 +104,7 @@ class EmbeddingCNN(object):
         self.create_loss_fn(W, b, vocab_model)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        with tf.name_scope('loss'), tf.device('/cpu:0'):
+        with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
             losses = tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
@@ -135,7 +135,7 @@ class EmbeddingCNN(object):
             feed_dict=feed_dict
         )
         time_str = datetime.datetime.now().isoformat()
-        if step % 100 == 0:
+        if step % 10 == 0:
             print("{}: step {}, loss {:g}".format(time_str, step, loss))
         self.train_summary_writer.add_summary(summaries, step)
 
@@ -158,15 +158,15 @@ class EmbeddingCNN(object):
         self.dev_summary_writer.add_summary(summaries, step)
 
     def train(self, batches):
-        with self.sess.as_default():
+        with self.sess.as_default(), tf.device('/cpu:0'):
             ######## Misc housekeeping ###########
             timestamp = str(int(time.time()))
             out_dir = os.path.abspath(os.path.join(os.path.curdir, 'tf', timestamp))
             print('Writing summaries to {}.'.format(out_dir))
 
             self.loss_summary = tf.scalar_summary('loss', self.loss)
-            self.train_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph_def)
-            self.dev_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph_def)
+            self.train_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph)
+            self.dev_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph)
 
             checkpoint_dir = os.path.abspath(os.path.join(out_dir, 'checkpoints'))
             checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
@@ -176,6 +176,7 @@ class EmbeddingCNN(object):
             self.saver = tf.train.Saver(tf.all_variables())
             ######## /Misc housekeeping ###########
 
+        with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
@@ -191,7 +192,7 @@ class EmbeddingCNN(object):
                 y_batch = np.reshape(y_batch, (len(y_batch), 1))
                 self.train_step(x_batch, y_batch)
                 current_step = tf.train.global_step(self.sess, self.global_step)
-                if current_step % 100 == 0:
+                if current_step % 100 == 1:
                     print("\nEvaluation: ")
                     self.dev_step(x_batch, y_batch)
                 if current_step % 1000 == 0:

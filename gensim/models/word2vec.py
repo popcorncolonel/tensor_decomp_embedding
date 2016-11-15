@@ -172,7 +172,8 @@ except ImportError as E:
 
     def cnn_batch_generator(model, sentences, batch_size=512, n_iters=5):
         batch = []
-        for _ in range(n_iters):
+        for i in range(n_iters):
+            print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
             for sentence in sentences:
                 #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
                 #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
