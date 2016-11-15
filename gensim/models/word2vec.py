@@ -77,6 +77,7 @@ from copy import deepcopy
 from collections import defaultdict
 import threading
 import itertools
+import random
 
 from gensim.utils import keep_vocab_item
 
@@ -148,47 +149,45 @@ except ImportError as E:
     def get_context_matrix(model, word_vocabs, word_index):
         # `word_index` is the index in word_vocabs where the target word appears.
         # word_vocabs is a list of vocabs corresponding to sentence indices
-        word_matrix = zeros(shape=(2 * model.window, len(model.vocab)))  # `model.window` words before and after the target word. -1 because not including the word itself.
         start = word_index - model.window
         window_pos = []
         for i in range(start, word_index + model.window + 1):
             if i == word_index:
                 continue
             if 0 <= i < len(word_vocabs):
-                window_pos.append(word_vocabs[i])
-            else:
-                window_pos.append(None)
+                window_pos.append(word_vocabs[i].index)
+                assert word_vocabs[i] != len(model.vocab)
+                assert word_vocabs[i] != len(model.vocab) + 1
+            elif i < 0: # before sentence
+                window_pos.append(len(model.vocab)) # this is the "padding" vector (<S> token)
+            else: # after sentence
+                window_pos.append(len(model.vocab) + 1) # this is the "padding" vector (</S> token)
 
-        # `word2_indices` = list of context word indices
-        last_index = None
-        for matrix_index, word_vocab in enumerate(window_pos):
-            if word_vocab is not None:
-                word_matrix[matrix_index][word_vocab.index] += 1.
-            last_index = matrix_index
-        assert last_index == 2 * model.window - 1
-        return word_matrix
+        return window_pos
 
 
     def get_target_y(word_vocabs, word_index):
         return word_vocabs[word_index].index
 
 
-    def cnn_batch_generator(model, sentences, batch_size=128):
+    def cnn_batch_generator(model, sentences, batch_size=512, n_iters=5):
         #result = 0
         batch = []
-        for sentence in sentences:
-            #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
-            #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
-            #TODO: replace with UNK token? could do experiments.
-            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
-            for pos, word in enumerate(word_vocabs):
-                # `word` is the word we're trying to predict
-                word_matrix = get_context_matrix(model, word_vocabs, pos)
-                target_y = get_target_y(word_vocabs, pos)
-                batch.append((word_matrix, target_y))
-                if len(batch) == batch_size:
-                    yield batch
-                    batch = []
+        for _ in range(n_iters):
+            for sentence in sentences:
+                #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
+                #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
+                #TODO: replace with UNK token? could do experiments.
+                word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
+                for pos, word in enumerate(word_vocabs):
+                    # `word` is the word we're trying to predict
+                    word_matrix = get_context_matrix(model, word_vocabs, pos)
+                    target_y = get_target_y(word_vocabs, pos)
+                    batch.append((word_matrix, target_y))
+                    if len(batch) == batch_size:
+                        random.shuffle(batch)
+                        yield batch
+                        batch = []
 
                 #train_cnn_pair(model, word, word_matrix, alpha)
             #result += len(word_vocabs)

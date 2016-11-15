@@ -29,8 +29,8 @@ class EmbeddingCNN(object):
         #with tf.Graph().as_default():
         self.sess = tf.Session()
         with self.sess.as_default():
-            self.input_x = tf.placeholder(tf.int32, [None, context_size, len(vocab_model.vocab)], name='input_x')
-            self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y')  # Index of correct word. (list for minibatching)
+            self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
+            self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
             self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
             self.create_embedding_layer(vocab_model, embedding_size)
             self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
@@ -47,9 +47,11 @@ class EmbeddingCNN(object):
         with tf.name_scope('embedding'):
             W = tf.Variable(
                 # |V| x d embedding matrix
-                tf.random_uniform([len(vocab_model.vocab), embedding_size])
+                # + 2 for <S> and </S>
+                tf.random_uniform([len(vocab_model.vocab) + 2, embedding_size])
             )
-            # Embed the input. TODO: the embedding lookup might just take in a list of numbers rather than one-hot vectors.
+            self.word_embedding = W
+            # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
             # embedded_chars_expanded is of shape [None (minibatch size), context_size, embedding_size, 1 (#channel maps)]
             self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
@@ -107,7 +109,7 @@ class EmbeddingCNN(object):
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
         with tf.name_scope('loss'):
-            self.loss = tf.nn.sampled_softmax_loss(
+            losses = tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
                 inputs=self.h_drop,
@@ -115,6 +117,7 @@ class EmbeddingCNN(object):
                 num_sampled=self.vocab_model.negative,
                 num_classes=len(vocab_model.vocab),
             )
+            self.loss = tf.reduce_mean(losses)
 
     def create_accuracy(self):
         # TODO: accuracy. Make it analogy accuracy? Or % negative sampling correct?
@@ -136,7 +139,8 @@ class EmbeddingCNN(object):
             feed_dict=feed_dict
         )
         time_str = datetime.datetime.now().isoformat()
-        print("{}: step {}, loss {:g}".format(time_str, step, loss))
+        if step % 100 == 0:
+            print("{}: step {}, loss {:g}".format(time_str, step, loss))
         self.train_summary_writer.add_summary(summaries, step)
 
     def dev_step(self, x_batch, y_batch):
@@ -195,12 +199,13 @@ class EmbeddingCNN(object):
             self.sent_index = 0
             for batch in batches:
                 x_batch, y_batch = zip(*batch)
+                y_batch = np.reshape(y_batch, (len(y_batch), 1))
                 self.train_step(x_batch, y_batch)
                 current_step = tf.train.global_step(self.sess, self.global_step)
                 if current_step % 100 == 0:
                     print("\nEvaluation: ")
                     self.dev_step(x_batch, y_batch)
-                if current_step % 100 == 0:
+                if current_step % 1000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
 
