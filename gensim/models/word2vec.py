@@ -171,7 +171,6 @@ except ImportError as E:
 
 
     def cnn_batch_generator(model, sentences, batch_size=512, n_iters=5):
-        #result = 0
         batch = []
         for _ in range(n_iters):
             for sentence in sentences:
@@ -188,10 +187,6 @@ except ImportError as E:
                         random.shuffle(batch)
                         yield batch
                         batch = []
-
-                #train_cnn_pair(model, word, word_matrix, alpha)
-            #result += len(word_vocabs)
-        #return result
 
 
     def train_batch_cbow(model, sentences, alpha, work=None, neu1=None):

@@ -28,17 +28,13 @@ class EmbeddingCNN(object):
 
         #with tf.Graph().as_default():
         self.sess = tf.Session()
-        with self.sess.as_default():
+        with self.sess.as_default(), tf.device('/gpu:1'):
             self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
             self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
             self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
             self.create_embedding_layer(vocab_model, embedding_size)
             self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
             self.create_fully_connected_layer_and_loss_fn(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
-            #self.create_objective_fn()
-            #self.create_loss_fn()
-
-
 
     def write_graph(self):
         tf.train.SummaryWriter('/tmp/tf_logs', graph=self.sess.graph)
@@ -108,7 +104,7 @@ class EmbeddingCNN(object):
         self.create_loss_fn(W, b, vocab_model)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        with tf.name_scope('loss'):
+        with tf.name_scope('loss'), tf.device('/cpu:0'):
             losses = tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
@@ -160,13 +156,6 @@ class EmbeddingCNN(object):
         time_str = datetime.datetime.now().isoformat()
         print("(dev) {}: step {}, loss {:g}".format(time_str, step, loss))
         self.dev_summary_writer.add_summary(summaries, step)
-
-    def get_next_batch(self, sentences, num_iterations=5):
-        batch = []
-        if self.sent_index >= len(sentences):
-            return None
-
-
 
     def train(self, batches):
         with self.sess.as_default():
