@@ -78,8 +78,10 @@ from collections import defaultdict
 import threading
 import itertools
 import random
+import tensorflow as tf
 
 from gensim.utils import keep_vocab_item
+from gensim.models.cnn import EmbeddingCNN
 
 try:
     from queue import Queue, Empty
@@ -180,12 +182,16 @@ except ImportError as E:
                 #TODO: replace with UNK token? could do experiments.
                 word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
                 for pos, word in enumerate(word_vocabs):
+                    if pos < model.window:
+                        continue
+                    if pos + model.window >= len(word_vocabs):
+                        break
                     # `word` is the word we're trying to predict
                     word_matrix = get_context_matrix(model, word_vocabs, pos)
                     target_y = get_target_y(word_vocabs, pos)
                     batch.append((word_matrix, target_y))
                     if len(batch) == batch_size:
-                        random.shuffle(batch)
+                        # random.shuffle(batch)
                         yield batch
                         batch = []
 
@@ -341,17 +347,6 @@ def train_sg_pair(model, word, context_index, alpha, learn_vectors=True, learn_h
     return neu1e
 
 def train_cbow_pair(model, word, input_word_indices, l1, alpha, learn_vectors=True, learn_hidden=True):
-    '''
-    word: 
-    input_word_indices: indices in the table (what table?) to update the vectors for.
-    l1: layer 1. this is the averaged/summed context.
-
-    TODO (questions to answer):
-        -neu1e - what is it and what is it used for? "neuron 1 error"?
-        -model.syn1 - what is it and what is it used for?
-        -model.syn1neg - what is it and what is it used for?
-        -model.neg_labels - a `negative`x1 vector of [1, 0, 0, 0, ...]
-    '''
     neu1e = zeros(l1.shape)
 
     if model.hs:
@@ -536,6 +531,7 @@ class Word2Vec(utils.SaveLoad):
         self.total_train_time = 0
         self.sorted_vocab = sorted_vocab
         self.batch_words = batch_words
+
 
         if sentences is not None:
             if isinstance(sentences, GeneratorType):
@@ -807,9 +803,7 @@ class Word2Vec(utils.SaveLoad):
         """
         work, neu1 = inits
         tally = 0
-        if self.cnn:
-            tally += train_batch_cnn(self, sentences, alpha)
-        elif self.sg:
+        if self.sg:
             tally += train_batch_sg(self, sentences, alpha, work)
         else:
             tally += train_batch_cbow(self, sentences, alpha, work, neu1)
@@ -830,6 +824,23 @@ class Word2Vec(utils.SaveLoad):
         sentences are the same as those that were used to initially build the vocabulary.
 
         """
+
+        if self.cnn:
+            batches = cnn_batch_generator(self, sentences, batch_size=128, n_iters=5)
+
+            self.cnn = EmbeddingCNN(
+                self,
+                embedding_size=300,
+                filter_sizes=[3,4,5],
+                num_filters=100,
+                context_size=10,
+            )
+            self.cnn.write_graph()
+            self.cnn.train(batches)
+            with tf.Session() as sess:
+                self.syn0 = self.cnn.embedding2.eval(sess)
+            return
+
         if FAST_VERSION < 0:
             import warnings
             warnings.warn("C extension not loaded for Word2Vec, training will be slow. "
@@ -1152,8 +1163,6 @@ class Word2Vec(utils.SaveLoad):
 
         # do not suppress learning for already learned words
         self.syn0_lockf = ones(len(self.vocab), dtype=REAL)  # zeros suppress learning
-        if self.cnn:
-            pass # TODO: do this
 
     def reset_weights(self):
         """Reset all projection weights to an initial (untrained) state, but keep the existing vocabulary."""
@@ -1414,7 +1423,11 @@ class Word2Vec(utils.SaveLoad):
         if indexer is not None:
             return indexer.most_similar(mean, topn)
 
+        #if self.cnn:
+        #    pass
+
         limited = self.syn0norm if restrict_vocab is None else self.syn0norm[:restrict_vocab]
+        # limited is |V| x d (aka embedding matrix)
         dists = dot(limited, mean)
         if not topn:
             return dists
@@ -1908,12 +1921,15 @@ class Text8Corpus(object):
                     words = utils.to_unicode(text).split()
                     sentence.extend(words)  # return the last chunk of words, too (may be shorter/longer)
                     if sentence:
+
                         yield sentence
                     break
                 last_token = text.rfind(b' ')  # last token may have been split in two... keep for next iteration
                 words, rest = (utils.to_unicode(text[:last_token]).split(),
                                text[last_token:].strip()) if last_token >= 0 else ([], text)
                 sentence.extend(words)
+                sentence = [w.lower().replace('}', '').replace('{', '').replace(']', '').replace('[', '').replace(',', '').replace(')', '').replace('(', '').replace('\\', '') .replace('.', '').replace("'", '').replace('&quot;', '')
+                            for w in sentence if '<' not in w and '>' not in w and '="' not in w and '://' not in w and '&lt;' not in w and '&gt;' not in w and '&amp;' not in w and '=' not in w and '|' not in w]
                 while len(sentence) >= self.max_sentence_length:
                     yield sentence[:self.max_sentence_length]
                     sentence = sentence[self.max_sentence_length:]
