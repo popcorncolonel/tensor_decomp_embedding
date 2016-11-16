@@ -532,7 +532,6 @@ class Word2Vec(utils.SaveLoad):
         self.sorted_vocab = sorted_vocab
         self.batch_words = batch_words
 
-
         if sentences is not None:
             if isinstance(sentences, GeneratorType):
                 raise TypeError("You can't pass a generator as the sentences argument. Try an iterator.")

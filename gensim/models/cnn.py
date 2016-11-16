@@ -122,6 +122,10 @@ class EmbeddingCNN(object):
     def set_accuracy(self, *args, **kwargs):
         embedding = self.embedding2.eval(self.sess)
         self.vocab_model.syn0 = embedding
+        if hasattr(self.vocab_model, 'syn0norm'):
+            # We must delete the syn0norm of the vocab in order to compute accuracy.
+            # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
+            del self.vocab_model.syn0norm
         accuracy = self.vocab_model.accuracy('~/code/w2v_eval/questions-words.txt')
         correct = defaultdict(float)
         totals = defaultdict(float)
@@ -207,7 +211,7 @@ class EmbeddingCNN(object):
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
 
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-            grads_and_vars = optimizer.compute_gradients(self.loss) # TODO: try to get this on the gpu. try to get everything you can on the GPU.
+            grads_and_vars = optimizer.compute_gradients(self.loss)
 
         with tf.device('/gpu:1'):
             self.train_op = optimizer.apply_gradients(grads_and_vars, self.global_step)
