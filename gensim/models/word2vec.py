@@ -827,17 +827,16 @@ class Word2Vec(utils.SaveLoad):
         if self.cnn:
             batches = cnn_batch_generator(self, sentences, batch_size=128, n_iters=5)
 
-            self.cnn = EmbeddingCNN(
+            self.embedding_cnn = EmbeddingCNN(
                 self,
                 embedding_size=300,
                 filter_sizes=[3,4,5],
-                num_filters=100,
+                num_filters=50,
                 context_size=10,
             )
-            self.cnn.write_graph()
-            self.cnn.train(batches)
-            with tf.Session() as sess:
-                self.syn0 = self.cnn.embedding2.eval(sess)
+            self.embedding_cnn.write_graph()
+            self.embedding_cnn.train(batches)
+            self.embedding_cnn.set_vocab_model_embedding_matrix()
             return
 
         if FAST_VERSION < 0:
@@ -1411,7 +1410,8 @@ class Word2Vec(utils.SaveLoad):
             if isinstance(word, ndarray):
                 mean.append(weight * word)
             elif word in self.vocab:
-                mean.append(weight * self.syn0norm[self.vocab[word].index])
+                vect = weight * self.syn0norm[self.vocab[word].index]
+                mean.append(vect)
                 all_words.add(self.vocab[word].index)
             else:
                 raise KeyError("word '%s' not in vocabulary" % word)

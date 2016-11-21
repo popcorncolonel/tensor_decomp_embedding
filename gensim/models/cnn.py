@@ -22,7 +22,7 @@ class EmbeddingCNN(object):
         embedding_size,
         filter_sizes,
         num_filters,
-        context_size,  # = 2 * vocab_model.window
+        context_size,  # = 2 * vocab_model.window (= 10)
     ):
         self.vocab_model = vocab_model
         self.vocab = vocab_model.vocab
@@ -32,7 +32,7 @@ class EmbeddingCNN(object):
         with self.sess.as_default():
             with tf.device('/gpu:1'):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
-                self.input_y = tf.placeholder(tf.int32, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
+                self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
                 self.create_embedding_layer(embedding_size)
                 self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
@@ -56,6 +56,7 @@ class EmbeddingCNN(object):
 
     def create_conv_pooling_layer(self, embedding_size, filter_sizes, num_filters, context_size):
         pooled_outputs = []
+        num_features_total = 0
         for filter_size in filter_sizes:
             with tf.name_scope('conv-maxpool-{}'.format(filter_size)):
                 filter_shape = [filter_size, embedding_size, 1, num_filters]  # TODO: understand the dimensionality. Why is the third size 1?
@@ -70,20 +71,21 @@ class EmbeddingCNN(object):
                     name='conv',
                 )
                 h = tf.nn.relu(tf.nn.bias_add(conv, b), name='relu')
+                stride = int(context_size / 3) # int((context_size - filter_size + 1) / 3)
                 pooled = tf.nn.max_pool(
                     h,
-                    ksize=[1, context_size - filter_size + 1, 1, 1],
-                    strides=[1,1,1,1],
+                    ksize = [1, stride, 1, 1],
+                    strides=[1, stride, 1, 1],
                     padding='VALID',
                     name='pooling',
                 )
+                num_features_total += int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride))) # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
                 pooled_outputs.append(pooled)
-        num_filters_total = num_filters * len(filter_sizes)
         # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
-        # so h_pool is of shape [batch_size, 1, 1, num_filters_total]
-        h_pool = tf.concat(3, pooled_outputs)
+        # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
+        h_pool = tf.concat(1, pooled_outputs)
         # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
-        self.h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total], name='h_pool_flat')
+        self.h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
 
     def create_fully_connected_layer_and_loss_fn(self, num_filters_total, vocab_model):
         with tf.name_scope('dropout'):
@@ -92,7 +94,7 @@ class EmbeddingCNN(object):
             self.embedding2 = tf.Variable(
                 tf.truncated_normal(
                     #shape=[num_filters_total, len(vocab_model.vocab)],
-                    shape=[len(self.vocab), num_filters_total],
+                    shape=[len(self.vocab), int(self.h_pool_flat._shape[1])],
                     stddev=0.01
                 ),
                 name='W',
@@ -107,25 +109,44 @@ class EmbeddingCNN(object):
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
         with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
+            sampled_candidates, true_expected_count, sampled_expected_count = tf.nn.learned_unigram_candidate_sampler(
+                true_classes=self.input_y,
+                num_true=1,
+                num_sampled=self.vocab_model.negative,
+                unique=True,
+                range_max=len(vocab_model.vocab),
+                name="unigram_sampler",
+            )
+            # TODO: am I doing the unigram sampler correctly? do I need to do something else?
+            sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
             losses = tf.nn.nce_loss(
+            #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
                 inputs=self.h_drop,
                 labels=self.input_y,
                 num_sampled=self.vocab_model.negative,
                 num_classes=len(vocab_model.vocab),
+                remove_accidental_hits=True,
+                sampled_values=sampled_values,
             )
             self.loss = tf.reduce_mean(losses)
         with tf.name_scope('accuracy'), tf.device('/cpu:0'):
             self.accuracy = tf.Variable(0.0)
 
-    def set_accuracy(self, *args, **kwargs):
-        embedding = self.embedding2.eval(self.sess)
+    def get_embedding_matrix(self):
+        embedding = self.word_embedding.eval(self.sess)
+        return embedding
+
+    def set_vocab_model_embedding_matrix(self):
+        embedding = self.get_embedding_matrix()
         self.vocab_model.syn0 = embedding
-        if hasattr(self.vocab_model, 'syn0norm'):
-            # We must delete the syn0norm of the vocab in order to compute accuracy.
-            # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
-            del self.vocab_model.syn0norm
+        # We must delete the syn0norm of the vocab in order to compute accuracy.
+        # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
+        self.vocab_model.clear_sims()
+
+    def set_accuracy(self, *args, **kwargs):
+        self.set_vocab_model_embedding_matrix()
         accuracy = self.vocab_model.accuracy('~/code/w2v_eval/questions-words.txt')
         correct = defaultdict(float)
         totals = defaultdict(float)
@@ -147,8 +168,6 @@ class EmbeddingCNN(object):
         return self.accuracy.assign(correct['total'] / float(max(1, totals['total'])))
 
     def train_step(self, x_batch, y_batch, dropout_keep_prob=.5, print_every=100):
-        if self.start_time is None:
-            self.start_time = time.time()
         feed_dict = {
             self.input_x: x_batch,
             self.input_y: y_batch,
@@ -166,8 +185,6 @@ class EmbeddingCNN(object):
         time_str = datetime.datetime.now().isoformat()
         if step % print_every == 0:
             print("{}: step {}, loss {:g}".format(time_str, step, loss))
-            print("avg time per batch: {}".format((time.time() - self.start_time) / print_every))
-            self.start_time = time.time()
         self.train_summary_writer.add_summary(summaries, step)
 
     def dev_step(self, x_batch, y_batch):
@@ -176,17 +193,22 @@ class EmbeddingCNN(object):
             self.input_y: y_batch,
             self.dropout_keep_prob: 1.0,
         }
-        step, summaries, loss = self.sess.run(
+        set_acc_op = self.set_accuracy()
+        step, summaries, loss, _, _, acc_summ = self.sess.run(
             [
                 self.global_step,
                 self.loss_summary,
                 self.loss,
+                set_acc_op,
+                self.accuracy,
+                self.acc_summary,
             ],
             feed_dict=feed_dict
         )
         time_str = datetime.datetime.now().isoformat()
         print("(dev) {}: step {}, loss {:g}".format(time_str, step, loss))
         self.dev_summary_writer.add_summary(summaries, step)
+        self.dev_summary_writer.add_summary(acc_summ, step)
 
     def train(self, batches):
         with self.sess.as_default(), tf.device('/cpu:0'):
@@ -230,10 +252,12 @@ class EmbeddingCNN(object):
                 #if current_step % 500 == 1:
                 #    print("\nEvaluation: ")
                 #    self.dev_step(x_batch, y_batch)
-                if current_step % 2500 == 0:
+                if current_step % 10000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                    self.set_accuracy()
+                if current_step % 15000 == 0:
+                    #self.set_accuracy()
+                    self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))
             self.set_accuracy()
