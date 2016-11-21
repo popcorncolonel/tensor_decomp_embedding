@@ -71,7 +71,7 @@ class EmbeddingCNN(object):
                     name='conv',
                 )
                 h = tf.nn.relu(tf.nn.bias_add(conv, b), name='relu')
-                stride = int(context_size / 3) # int((context_size - filter_size + 1) / 3)
+                stride = int(context_size / 5) # int((context_size - filter_size + 1) / 3)
                 pooled = tf.nn.max_pool(
                     h,
                     ksize = [1, stride, 1, 1],
@@ -79,12 +79,13 @@ class EmbeddingCNN(object):
                     padding='VALID',
                     name='pooling',
                 )
-                num_features_total += int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride))) # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
+                num_features_total += num_filters*int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride))) # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
                 pooled_outputs.append(pooled)
         # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
         # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
         h_pool = tf.concat(1, pooled_outputs)
         # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
+        assert num_features_total == h_pool._shape[1] * h_pool._shape[3]
         self.h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
 
     def create_fully_connected_layer_and_loss_fn(self, num_filters_total, vocab_model):
