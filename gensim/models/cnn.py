@@ -35,7 +35,7 @@ class EmbeddingCNN(object):
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
                 self.create_embedding_layer(embedding_size)
-                self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
+                #self.create_conv_pooling_layer(embedding_size, filter_sizes, num_filters, context_size)
                 self.create_fully_connected_layer_and_loss_fn(num_filters_total=num_filters * len(filter_sizes), vocab_model=vocab_model)
 
     def write_graph(self):
@@ -53,6 +53,7 @@ class EmbeddingCNN(object):
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
             # embedded_chars_expanded is of shape [None (minibatch size), context_size, embedding_size, 1 (#channel maps)]
             self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
+            self.h = tf.reduce_mean(self.embedded_chars, 1)
 
     def create_conv_pooling_layer(self, embedding_size, filter_sizes, num_filters, context_size):
         pooled_outputs = []
@@ -84,11 +85,26 @@ class EmbeddingCNN(object):
         # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
         # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
         h_pool = tf.concat(1, pooled_outputs)
-        # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
+        # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_features_total].
         assert num_features_total == h_pool._shape[1] * h_pool._shape[3]
         self.h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
 
     def create_fully_connected_layer_and_loss_fn(self, num_filters_total, vocab_model):
+        W = tf.Variable(
+            tf.truncated_normal(
+                #shape=[num_filters_total, len(vocab_model.vocab)],
+                shape=[len(self.vocab), 300],
+                stddev=0.01
+            ),
+            name='W',
+        )
+        b = tf.Variable(
+            tf.constant(0., shape=[len(self.vocab)]),
+            name='b'
+        )
+        self.create_loss_fn(W, b, vocab_model)
+
+        return
         with tf.name_scope('dropout'):
             self.h_drop = tf.nn.dropout(self.h_pool_flat, self.dropout_keep_prob)
         with tf.name_scope('output'):
@@ -124,7 +140,8 @@ class EmbeddingCNN(object):
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
-                inputs=self.h_drop,
+                #inputs=self.h_drop,
+                inputs=self.h,
                 labels=self.input_y,
                 num_sampled=self.vocab_model.negative,
                 num_classes=len(vocab_model.vocab),
@@ -256,7 +273,7 @@ class EmbeddingCNN(object):
                 if current_step % 10000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                if current_step % 15000 == 0:
+                if current_step % 10000 == 0:
                     #self.set_accuracy()
                     self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
