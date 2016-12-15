@@ -30,7 +30,7 @@ class EmbeddingCNN(object):
         #with tf.Graph().as_default():
         self.sess = tf.Session()
         with self.sess.as_default():
-            with tf.device('/gpu:1'):
+            with tf.device('/gpu:0'):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
                 self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
@@ -236,7 +236,7 @@ class EmbeddingCNN(object):
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
 
-        with tf.device('/gpu:1'):
+        with tf.device('/gpu:0'):
             self.train_op = optimizer.apply_gradients(grads_and_vars, self.global_step)
 
             self.sess.run(tf.initialize_all_variables())

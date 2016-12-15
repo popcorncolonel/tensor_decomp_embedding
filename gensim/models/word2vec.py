@@ -1903,6 +1903,9 @@ class BrownCorpus(object):
                 yield words
 
 
+# Downloaded from NLTK corpus
+stopwords = {u'i', u'me', u'my', u'myself', u'we', u'our', u'ours', u'ourselves', u'you', u'your', u'yours', u'yourself', u'yourselves', u'he', u'him', u'his', u'himself', u'she', u'her', u'hers', u'herself', u'it', u'its', u'itself', u'they', u'them', u'their', u'theirs', u'themselves', u'what', u'which', u'who', u'whom', u'this', u'that', u'these', u'those', u'am', u'is', u'are', u'was', u'were', u'be', u'been', u'being', u'have', u'has', u'had', u'having', u'do', u'does', u'did', u'doing', u'a', u'an', u'the', u'and', u'but', u'if', u'or', u'because', u'as', u'until', u'while', u'of', u'at', u'by', u'for', u'with', u'about', u'against', u'between', u'into', u'through', u'during', u'before', u'after', u'above', u'below', u'to', u'from', u'up', u'down', u'in', u'out', u'on', u'off', u'over', u'under', u'again', u'further', u'then', u'once', u'here', u'there', u'when', u'where', u'why', u'how', u'all', u'any', u'both', u'each', u'few', u'more', u'most', u'other', u'some', u'such', u'no', u'nor', u'not', u'only', u'own', u'same', u'so', u'than', u'too', u'very', u's', u't', u'can', u'will', u'just', u'don\'t', u'should', u'now', u'd', u'll', u'm', u'o', u're', u've', u'y', u'ain\'t', u'aren\'t', u'couldn', u'didn', u'doesn', u'hadn', u'hasn', u'haven', u'isn', u'ma', u'mightn', u'mustn', u'needn', u'shan', u'shouldn', u'wasn', u'weren', u'won', u'wouldn', 'don', 'ain', 'aren', "didn't", "doesn't", "hadn't", "hasn't", "isn't", "mustn't", "shouldn't", "weren't", "won't", "don't", "wouldn't"}
+
 class Text8Corpus(object):
     """Iterate over sentences from the "text8" corpus, unzipped from http://mattmahoney.net/dc/text8.zip ."""
     def __init__(self, fname, max_sentence_length=MAX_WORDS_IN_BATCH):
@@ -1928,7 +1931,7 @@ class Text8Corpus(object):
                                text[last_token:].strip()) if last_token >= 0 else ([], text)
                 sentence.extend(words)
                 sentence = [w.lower().replace('}', '').replace('{', '').replace(']', '').replace('[', '').replace(',', '').replace(')', '').replace('(', '').replace('\\', '') .replace('.', '').replace("'", '').replace('&quot;', '')
-                            for w in sentence if '<' not in w and '>' not in w and '="' not in w and '://' not in w and '&lt;' not in w and '&gt;' not in w and '&amp;' not in w and '=' not in w and '|' not in w]
+                            for w in sentence if '<' not in w and '>' not in w and '="' not in w and '://' not in w and '&lt;' not in w and '&gt;' not in w and '&amp;' not in w and '=' not in w and '|' not in w and w not in stopwords]
                 while len(sentence) >= self.max_sentence_length:
                     yield sentence[:self.max_sentence_length]
                     sentence = sentence[self.max_sentence_length:]
