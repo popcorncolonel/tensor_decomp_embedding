@@ -9,18 +9,18 @@ from gensim.models.word2vec import BrownCorpus
 from gensim.corpora.wikicorpus import WikiCorpus
 
 
-brown_loc = '/home/eric/nltk_data/corpora/brown'
-wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
+#brown_loc = '/home/eric/nltk_data/corpora/brown'
+#wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
 text9_loc = 'data/enwik9'
 text8_loc = 'data/enwik8'
 
 corpus = 'text8'
 
 corpus_dict = {
-    'brown': (BrownCorpus(brown_loc, False), 10, 30000),
+    #'brown': (BrownCorpus(brown_loc, False), 10, 30000),
     #'wiki': (WikiCorpus(wiki_loc), 5, 30),
-    'text9': (Text8Corpus(text9_loc), 5, 30000),
-    'text8': (Text8Corpus(text8_loc), 5, 30000),
+    'text9': (Text8Corpus(text9_loc), 2, 30000),
+    'text8': (Text8Corpus(text8_loc), 2, 30000),
 }
 
 sentences, iters, max_vocab_size = corpus_dict[corpus]

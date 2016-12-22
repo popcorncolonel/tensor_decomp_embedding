@@ -172,7 +172,7 @@ except ImportError as E:
         return word_vocabs[word_index].index
 
 
-    def cnn_batch_generator(model, sentences, batch_size=512, n_iters=5):
+    def cnn_batch_generator(model, sentences, batch_size=512, n_iters=2):
         batch = []
         for i in range(n_iters):
             print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
@@ -825,7 +825,7 @@ class Word2Vec(utils.SaveLoad):
         """
 
         if self.cnn:
-            batches = cnn_batch_generator(self, sentences, batch_size=128, n_iters=5)
+            batches = cnn_batch_generator(self, sentences, batch_size=128, n_iters=2)
 
             self.embedding_cnn = EmbeddingCNN(
                 self,
