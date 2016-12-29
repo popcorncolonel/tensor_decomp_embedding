@@ -9,10 +9,10 @@ from gensim.models.word2vec import BrownCorpus
 from gensim.corpora.wikicorpus import WikiCorpus
 
 
-brown_loc = 'data/brown/brown'
+brown_loc = '/cluster/home/ebaile01/data/brown/brown'
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
-text9_loc = 'data/enwik9'
-text8_loc = 'data/enwik8'
+text9_loc = '/cluster/home/ebaile01/data/enwik9'
+text8_loc = '/cluster/home/ebaile01/data/enwik8'
 
 corpus = 'text8'
 
