@@ -81,7 +81,7 @@ import random
 import tensorflow as tf
 
 from gensim.utils import keep_vocab_item
-from gensim.models.cnn import EmbeddingCNN
+from gensim.models.alt_embedding import SubspaceProjEmbedding
 
 try:
     from queue import Queue, Empty
@@ -172,7 +172,9 @@ except ImportError as E:
         return word_vocabs[word_index].index
 
 
-    def cnn_batch_generator(model, sentences, batch_size=512, n_iters=2):
+    def batch_generator(model, sentences, batch_size=512, n_iters=None):
+        if not n_iters:
+            n_iters = model.iter
         batch = []
         for i in range(n_iters):
             print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
@@ -290,18 +292,6 @@ try:
     PYEMD_EXT = True
 except ImportError:
     PYEMD_EXT = False
-
-def train_cnn_pair(model, word, word_matrix, alpha, learn_vectors=True, learn_hidden=True):
-    '''
-
-    :param model:
-    :param word:
-    :param word_matrix: C x |V| matrix. word_matrix[i] is the zero vector (in R^|V|) if it is OOV or the context goes over the range of the sentence.
-    :param alpha:
-    :param learn_vectors:
-    :param learn_hidden:
-    '''
-    pass
 
 def train_sg_pair(model, word, context_index, alpha, learn_vectors=True, learn_hidden=True,
                   context_vectors=None, context_locks=None):
@@ -426,7 +416,7 @@ class Word2Vec(utils.SaveLoad):
             self, sentences=None, size=100, alpha=0.025, window=5, min_count=5,
             max_vocab_size=None, sample=1e-3, seed=1, workers=3, min_alpha=0.0001,
             sg=0, hs=0, negative=5, cbow_mean=1, hashfxn=hash, iter=5, null_word=0,
-            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, cnn=0):
+            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -505,7 +495,7 @@ class Word2Vec(utils.SaveLoad):
         self.vocab = {}  # mapping from a word (string) to a Vocab object
         self.index2word = []  # map from a word's matrix index (int) to word (string)
         self.sg = int(sg)
-        self.cnn = int(cnn)
+        self.subspace = int(subspace)
         self.cum_table = None  # for negative sampling
         self.vector_size = int(size)
         self.layer1_size = int(size)
@@ -824,19 +814,16 @@ class Word2Vec(utils.SaveLoad):
 
         """
 
-        if self.cnn:
-            batches = cnn_batch_generator(self, sentences, batch_size=128, n_iters=2)
+        if self.subspace:
+            batches = batch_generator(self, sentences, batch_size=128, n_iters=2)
 
-            self.embedding_cnn = EmbeddingCNN(
-                self,
+            self.embedding_model = SubspaceProjEmbedding(
+                vocab_model=self,
                 embedding_size=300,
-                filter_sizes=[3,4,5],
-                num_filters=50,
                 context_size=10,
             )
-            self.embedding_cnn.write_graph()
-            self.embedding_cnn.train(batches)
-            self.embedding_cnn.set_vocab_model_embedding_matrix()
+            self.embedding_model.train(batches)
+            self.embedding_model.set_vocab_model_embedding_matrix()
             return
 
         if FAST_VERSION < 0:
@@ -1421,9 +1408,6 @@ class Word2Vec(utils.SaveLoad):
 
         if indexer is not None:
             return indexer.most_similar(mean, topn)
-
-        #if self.cnn:
-        #    pass
 
         limited = self.syn0norm if restrict_vocab is None else self.syn0norm[:restrict_vocab]
         # limited is |V| x d (aka embedding matrix)

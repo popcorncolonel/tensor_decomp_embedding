@@ -11,16 +11,16 @@ from gensim.corpora.wikicorpus import WikiCorpus
 
 #brown_loc = '/home/eric/nltk_data/corpora/brown'
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
-text9_loc = 'data/enwik9'
-text8_loc = 'data/enwik8'
+text9_loc = '/cluster/home/ebaile01/data/enwik9'
+text8_loc = '/cluster/home/ebaile01/data/enwik8'
 
 corpus = 'text8'
 
 corpus_dict = {
     #'brown': (BrownCorpus(brown_loc, False), 10, 30000),
     #'wiki': (WikiCorpus(wiki_loc), 5, 30),
-    'text9': (Text8Corpus(text9_loc), 2, 30000),
-    'text8': (Text8Corpus(text8_loc), 2, 30000),
+    'text9': (Text8Corpus(text9_loc), 1, 30000),
+    'text8': (Text8Corpus(text8_loc), 1, 30000),
 }
 
 sentences, iters, max_vocab_size = corpus_dict[corpus]
@@ -49,7 +49,7 @@ def print_accuracy(model):
 
 
 def get_model_with_vocab(fname=corpus+'vocab', load=False):
-    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, cnn=1)
+    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, subspace=1)
     if load:
         print('depickling model...')
         with open(fname, 'rb') as f:
@@ -64,7 +64,7 @@ def get_model_with_vocab(fname=corpus+'vocab', load=False):
 
 
 def main():
-    if '--loadcnn' in sys.argv:
+    if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'vocab', load=True)
         embedding = tf.Variable(tf.random_uniform([len(model.vocab), 300]), name="embedding/embedding_matrix")
         saver = tf.train.Saver()
@@ -89,20 +89,6 @@ def main():
                     jpeg = sess.run(image)
                     f.write(jpeg)
 
-        '''
-        sentences = [
-            'the queen sat on her throne next to the fierce tiger',
-            'i read that i have to book a flight',
-            'i have to read a book on that flight',
-            'having is not the same as giving',
-        ]
-        with open('images/sentences_word2vec.txt', 'w') as f:
-            for i, sent in enumerate(sentences):
-                save_sent_jpeg(sent, 'images/{}_word2vec.jpeg'.format(i))
-                f.write('{}: {}\n'.format(i, sent))
-            print('here')
-        print('done')
-        '''
         vectors = {}
         for word in model.vocab:
             word_vocab = model.vocab[word]
@@ -115,11 +101,6 @@ def main():
                     continue
                 f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
         sys.exit()
-
-
-    elif '--load' in sys.argv:
-        from gensim.models.word2vec import Word2Vec
-        model = Word2Vec.load(corpus+'model')
 
     else:
         if '--loadvocab' not in sys.argv:
