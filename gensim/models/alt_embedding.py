@@ -191,7 +191,7 @@ class SubspaceProjEmbedding(object):
 
             if not os.path.exists(checkpoint_dir):
                 os.makedirs(checkpoint_dir)
-            self.saver = tf.train.Saver(tf.all_variables())
+            self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2)
             ######## /Misc housekeeping ###########
 
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
