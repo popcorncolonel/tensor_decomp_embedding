@@ -34,7 +34,6 @@ class SubspaceProjEmbedding(object):
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
-            log_device_placement=True,
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
@@ -61,7 +60,10 @@ class SubspaceProjEmbedding(object):
             # Instead of the mean, it is the projection (of the real word?) onto the subspace spanned by the context words. 
             context_T = self.embedded_chars  # W (of shape (None, |C|, k)) (None for the batch size)
             context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (None, k, |C|). 
-            inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix))  #  (W^T * W)^-1    <-- Inverts each matrix in the batch
+            lambda_ = .01
+            id_10 = tf.constant(value=lambda_*np.identity(10), dtype=tf.float32)
+
+            inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + id_10)  #  (W^T * W)^-1    <-- Inverts each matrix in the batch
             proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
             word_T = tf.nn.embedding_lookup(W, self.input_y)
             word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. But embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
@@ -191,7 +193,7 @@ class SubspaceProjEmbedding(object):
 
     def train(self, batches):
         with self.sess.as_default(), tf.device('/cpu:0'):
-            ######## Misc housekeeping ###########
+            ######## Misc housekeeping: logs, summaries, tensorboard, checkpoints ###########
             timestamp = str(datetime.datetime.now())
             out_dir = os.path.abspath(os.path.join(os.path.curdir, 'tf', timestamp))
             print('Writing summaries to {}.'.format(out_dir))

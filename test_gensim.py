@@ -1,3 +1,4 @@
+import os
 import gensim
 import pickle
 import sys
@@ -63,15 +64,38 @@ def get_model_with_vocab(fname=corpus+'vocab', load=False):
     return model
 
 
+def evaluate_embedding(embedding):
+    model = get_model_with_vocab(load=True)
+    model.syn0 = embedding
+    # We must delete the syn0norm of the vocab in order to compute accuracy.
+    # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
+    model.clear_sims()
+    print_accuracy(model)
+
+
+def list_vars_in_checkpoint(dirname):
+    from tensorflow.contrib.framework.python.framework.checkpoint_utils import list_variables
+    abspath = os.path.abspath(dirname)
+    return list_variables(abspath)
+
+
 def main():
     if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'vocab', load=True)
         embedding = tf.Variable(tf.random_uniform([len(model.vocab), 300]), name="embedding/embedding_matrix")
-        saver = tf.train.Saver()
+        embedding2 = tf.Variable(tf.random_uniform([len(model.vocab), 300]), name="W")
+        saver = tf.train.Saver(write_version=tf.train.SaverDef.V2)
         with tf.Session() as sess:
-            saver.restore(sess, 'tf/text8_word2vec/checkpoints/model-437101')
+            saver.restore(sess, 'tf/text8_subspace/checkpoints/model-163478')
+            print(list_vars_in_checkpoint('tf/text8_subspace/checkpoints/model-163478'))
             embedding = embedding.eval(sess)
+            embedding2 = embedding2.eval(sess)
+            import pdb; pdb.set_trace()
 
+            print('evaluating...')
+        evaluate_embedding(embedding)
+        evaluate_embedding(embedding2)
+        import pdb; pdb.set_trace()
         def save_sent_jpeg(sentence, fname):
             sentence = sentence.split()
             model.syn0 = embedding
