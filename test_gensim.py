@@ -123,7 +123,7 @@ def main():
     print_accuracy(model)
     print('Corpus: {} ({})'.format(sentences, corpus))
     print('iters: {}'.format(iters))
-    #print('min_vocab_count: {}'.format(min_count))
+    print('vocab len: {}'.format(len(model.vocab)))
 
 
 if __name__ == '__main__':

@@ -32,7 +32,11 @@ class SubspaceProjEmbedding(object):
         self.vocab_model = vocab_model
         self.vocab = vocab_model.vocab
 
-        self.sess = tf.Session()
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+            log_device_placement=True,
+        )
+        self.sess = tf.Session(config=config)
         with self.sess.as_default():
             with tf.device('/gpu:0'):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
@@ -54,10 +58,22 @@ class SubspaceProjEmbedding(object):
             self.word_embedding = W
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
-            # embedded_chars_expanded is of shape [None (minibatch size), context_size, embedding_size, 1 (#channel maps)]
-            self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
-            self.h = tf.reduce_mean(self.embedded_chars, 1)
-            # TODO: change this. Instead of the mean, it is the projection (of the real word?) onto the subspace spanned by the context words. 
+            # Instead of the mean, it is the projection (of the real word?) onto the subspace spanned by the context words. 
+            context_T = self.embedded_chars  # W (of shape (None, |C|, k)) (None for the batch size)
+            context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (None, k, |C|). 
+            inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix))  #  (W^T * W)^-1    <-- Inverts each matrix in the batch
+            proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
+            word_T = tf.nn.embedding_lookup(W, self.input_y)
+            word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. But embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
+            self.h = tf.batch_matmul(proj_matrix, word)
+            self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
+            '''
+            b = tf.Variable(
+                tf.constant(0., shape=[len(self.vocab)]),
+                name='b'
+            )
+            self.h = h + b
+            '''
 
     def create_fully_connected_layer_and_loss_fn(self, vocab_model):
         W = tf.Variable(
@@ -88,7 +104,6 @@ class SubspaceProjEmbedding(object):
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
-                #inputs=self.h_drop,
                 inputs=self.h,
                 labels=self.input_y,
                 num_sampled=self.vocab_model.negative,
