@@ -50,7 +50,7 @@ def print_accuracy(model):
 
 
 def get_model_with_vocab(fname=corpus+'vocab', load=False):
-    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, subspace=1)
+    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=100, subspace=1)
     if load:
         print('depickling model...')
         with open(fname, 'rb') as f:
@@ -82,20 +82,19 @@ def list_vars_in_checkpoint(dirname):
 def main():
     if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'vocab', load=True)
-        embedding = tf.Variable(tf.random_uniform([len(model.vocab), 300]), name="embedding/embedding_matrix")
-        embedding2 = tf.Variable(tf.random_uniform([len(model.vocab), 300]), name="W")
+        embedding = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="embedding/embedding_matrix")
+        embedding2 = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="fully_connected/W")
         saver = tf.train.Saver(write_version=tf.train.SaverDef.V2)
         with tf.Session() as sess:
-            saver.restore(sess, 'tf/text8_subspace/checkpoints/model-163478')
-            print(list_vars_in_checkpoint('tf/text8_subspace/checkpoints/model-163478'))
+            saver.restore(sess, 'tf/text8_subspace100/checkpoints/model-163478')
+            print(list_vars_in_checkpoint('tf/text8_subspace100/checkpoints/model-163478'))
+            #print(list_vars_in_checkpoint('tf/2017-01-01 12:14:59.907021/checkpoints/model-163478'))
             embedding = embedding.eval(sess)
             embedding2 = embedding2.eval(sess)
-            import pdb; pdb.set_trace()
 
             print('evaluating...')
         evaluate_embedding(embedding)
         evaluate_embedding(embedding2)
-        import pdb; pdb.set_trace()
         def save_sent_jpeg(sentence, fname):
             sentence = sentence.split()
             model.syn0 = embedding
@@ -141,6 +140,10 @@ def main():
 
     print("most similar to king - man + woman: {}".format(model.most_similar(
         positive=['king', 'woman'], negative=['man'],
+        topn=5,
+    )))
+    print("most similar to king: {}".format(model.most_similar(
+        positive=['king'],
         topn=5,
     )))
 

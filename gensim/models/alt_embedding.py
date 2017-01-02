@@ -15,7 +15,7 @@ class SubspaceProjEmbedding(object):
     create_embedding_layer,
     create_fully_connected_layer_and_loss_fn,
     create_loss_fn,
-    get_embedding_matrix, 
+    get_embedding_matrix(1|2), 
     set_vocab_model_embedding_matrix, 
     set_accuracy,
     train_set,
@@ -59,39 +59,50 @@ class SubspaceProjEmbedding(object):
             self.word_embedding = W
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
-            # Instead of the mean, it is the projection (of the real word) onto the subspace spanned by the context words. 
-            context_T = self.embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
-            context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
-            lambda_ = .01
-            identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
-
-            inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
-            proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
-            word_T = tf.nn.embedding_lookup(W, self.input_y)
-            word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
-            self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
-            self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
-            '''
-            b = tf.Variable(
+            self.embedding_b = tf.Variable(
                 tf.constant(0., shape=[self.embedding_size]),
                 name='b'
             )
-            self.h = self.h + b
-            '''
+
+            if True:  # Subspace
+                # Instead of the mean, it is the projection (of the real word) onto the subspace spanned by the context words. 
+                context_T = self.embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
+                context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
+                lambda_ = 1
+                identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
+
+                inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
+                proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
+                word_T = tf.nn.embedding_lookup(W, self.input_y)
+                word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
+                self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
+                self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
+                #self.h = self.h + self.embedding_b
+            else:  # CBOW
+                self.h = tf.reduce_mean(self.embedded_chars, 1) + self.embedding_b
 
     def create_fully_connected_layer_and_loss_fn(self, vocab_model):
-        W = tf.Variable(
-            tf.truncated_normal(
-                shape=[len(self.vocab), 300],
-                stddev=0.01
-            ),
-            name='W',
-        )
-        b = tf.Variable(
-            tf.constant(0., shape=[len(self.vocab)]),
-            name='b'
-        )
-        self.create_loss_fn(W, b, vocab_model)
+        with tf.name_scope('fully_connected'):
+            '''
+            self.fc_W = self.word_embedding
+            self.embedding_b = tf.Variable(
+                tf.constant(0., shape=[self.embedding_size]),
+                name='b'
+            )
+            self.fc_b = self.embedding_b
+            '''
+            self.fc_W = tf.Variable(
+                tf.truncated_normal(
+                    shape=[len(self.vocab), self.embedding_size],
+                    stddev=0.01
+                ),
+                name='W',
+            )
+            self.fc_b = tf.Variable(
+                tf.constant(0., shape=[len(self.vocab)]),
+                name='b',
+            )
+        self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
         with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
@@ -119,12 +130,16 @@ class SubspaceProjEmbedding(object):
         with tf.name_scope('accuracy'), tf.device('/cpu:0'):
             self.accuracy = tf.Variable(0.0)
 
-    def get_embedding_matrix(self):
+    def get_embedding_matrix1(self):
         embedding = self.word_embedding.eval(self.sess)
         return embedding
 
+    def get_embedding_matrix2(self):
+        embedding = self.fc_W.eval(self.sess)
+        return embedding
+
     def set_vocab_model_embedding_matrix(self):
-        embedding = self.get_embedding_matrix()
+        embedding = self.get_embedding_matrix1()
         self.vocab_model.syn0 = embedding
         # We must delete the syn0norm of the vocab in order to compute accuracy.
         # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
