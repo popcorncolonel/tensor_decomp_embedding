@@ -81,7 +81,7 @@ import random
 import tensorflow as tf
 
 from gensim.utils import keep_vocab_item
-from gensim.models.alt_embedding import SubspaceProjEmbedding
+from gensim.models.alt_embedding import WordEmbedding
 
 try:
     from queue import Queue, Empty
@@ -817,7 +817,7 @@ class Word2Vec(utils.SaveLoad):
         if self.subspace:
             batches = batch_generator(self, sentences, batch_size=128, n_iters=2)
 
-            self.embedding_model = SubspaceProjEmbedding(
+            self.embedding_model = WordEmbedding(
                 vocab_model=self,
                 embedding_size=self.vector_size,
                 context_size=2*self.window,

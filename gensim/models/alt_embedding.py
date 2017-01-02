@@ -7,7 +7,7 @@ import os
 from collections import defaultdict
 
 
-class SubspaceProjEmbedding(object):
+class WordEmbedding(object):
     """
       Methods:
     __init__,
@@ -28,11 +28,13 @@ class SubspaceProjEmbedding(object):
         vocab_model,
         embedding_size,
         context_size,  # = 2 * vocab_model.window (= 10)
+        subspace=False,
     ):
         self.vocab_model = vocab_model
         self.vocab = vocab_model.vocab
         self.embedding_size = embedding_size
         self.context_size = context_size
+        self.subspace = subspace
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
@@ -49,6 +51,33 @@ class SubspaceProjEmbedding(object):
     def write_graph(self):
         tf.train.SummaryWriter('tf/graphs', graph=self.sess.graph)
 
+    def embed_with_cbow(self, embedded_chars):
+        '''
+        Given the embedding of the input, embeds the hidden layer with the formulation in CBOW
+        '''
+        self.embedding_b = tf.Variable(
+            tf.constant(0., shape=[self.embedding_size]),
+            name='b'
+        )
+        self.h = tf.reduce_mean(embedded_chars, 1) + self.embedding_b
+
+    def embed_with_subspace_proj(self, embedded_chars):
+        '''
+        Given the embedding of the input, embeds the context vector as the projection of the correct word
+        onto the subspace spanned by the context words.
+        '''
+        context_T = embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
+        context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
+        lambda_ = 1
+        identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
+
+        inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
+        proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
+        word_T = tf.nn.embedding_lookup(W, self.input_y)
+        word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
+        self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
+        self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
+
     def create_embedding_layer(self, embedding_size):
         with tf.name_scope('embedding'):
             W = tf.Variable(
@@ -59,27 +88,13 @@ class SubspaceProjEmbedding(object):
             self.word_embedding = W
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
-            self.embedding_b = tf.Variable(
-                tf.constant(0., shape=[self.embedding_size]),
-                name='b'
-            )
 
-            if True:  # Subspace
-                # Instead of the mean, it is the projection (of the real word) onto the subspace spanned by the context words. 
-                context_T = self.embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
-                context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
-                lambda_ = 1
-                identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
-
-                inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
-                proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
-                word_T = tf.nn.embedding_lookup(W, self.input_y)
-                word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
-                self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
-                self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
-                #self.h = self.h + self.embedding_b
+            if self.subspace:  # Subspace
+                print("Embedding the context via subspace projection.")
+                self.embed_with_subspace_proj(self.embedded_chars)
             else:  # CBOW
-                self.h = tf.reduce_mean(self.embedded_chars, 1) + self.embedding_b
+                print("Embedding the context with simple averaging.")
+                self.embed_with_cbow(self.embedded_chars)
 
     def create_fully_connected_layer_and_loss_fn(self, vocab_model):
         with tf.name_scope('fully_connected'):
