@@ -68,7 +68,7 @@ class WordEmbedding(object):
         '''
         context_T = embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
         context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
-        lambda_ = 10
+        lambda_ = 1000
         identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
 
         inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   

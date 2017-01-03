@@ -25,6 +25,7 @@ corpus_dict = {
 }
 
 sentences, iters, max_vocab_size = corpus_dict[corpus]
+iters = 2
 
 
 def print_accuracy(model):
@@ -156,8 +157,7 @@ def main():
     print('Corpus: {} ({})'.format(sentences, corpus))
     print('iters: {}'.format(iters))
     print('vocab len: {}'.format(len(model.vocab)))
-    embedding = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="embedding/embedding_matrix")
-    embedding = embedding.eval(model.embedding_model.sess)
+    embedding = model.syn0
     write_embedding_to_file(model, embedding)
     print("Wrote vectors to vectors.txt")
 
