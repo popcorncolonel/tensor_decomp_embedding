@@ -119,8 +119,31 @@ class WordEmbedding(object):
             )
         self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
 
+    def create_loss(self, fc_W, fc_b, sampled_candidates):
+        '''
+        Returns the per-example negative log likelihood defined exponentially. 
+
+        i.e., -log(exp(context . word)) + sum_{w'} log(exp(context . w')) = -context . word + sum_{w'} context . w'
+        We are trying to minimize this value. 
+        '''
+        # TODO: What should we be doing with fc_b?
+        # Look up true vector
+        word = tf.nn.embedding_lookup(fc_W, self.input_y)
+        word = tf.unstack(word, axis=1)[0]  # turn the hidden output from a (?,1,300) tensor into a (?,300) tensor
+        # Look up sampled vectors
+        sampled = tf.nn.embedding_lookup(fc_W, sampled_candidates)
+        context_vect = self.h
+
+
+        def tf_dot(x, y):
+            ''' Returns the dot product of two tensorflow vectors (whose 0th axis is of dim ? because of batches). '''
+            return tf.reduce_sum(tf.mul(x,y), 1)
+
+        return -tf_dot(context_vect, word) + tf.reduce_mean(tf.matmul(context_vect, sampled, transpose_b=True), 1)
+
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
+        #with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
+        with tf.name_scope('loss'), tf.device('/gpu:0'):
             sampled_candidates, true_expected_count, sampled_expected_count = tf.nn.learned_unigram_candidate_sampler(
                 true_classes=self.input_y,
                 num_true=1,
@@ -130,6 +153,10 @@ class WordEmbedding(object):
                 name="unigram_sampler",
             )
             sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
+
+            losses = self.create_loss(fc_W, fc_b, sampled_candidates)
+
+            '''
             losses = tf.nn.nce_loss(
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
@@ -141,7 +168,9 @@ class WordEmbedding(object):
                 remove_accidental_hits=True,
                 sampled_values=sampled_values,
             )
+            '''
             self.loss = tf.reduce_mean(losses)
+            self.loss += .01 * (tf.nn.l2_loss(self.word_embedding) + tf.nn.l2_loss(fc_W))  # regularization
         with tf.name_scope('accuracy'), tf.device('/cpu:0'):
             self.accuracy = tf.Variable(0.0)
 
@@ -243,12 +272,12 @@ class WordEmbedding(object):
             self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2)
             ######## /Misc housekeeping ###########
 
+        with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
 
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
 
-        with tf.device('/gpu:0'):
             self.train_op = optimizer.apply_gradients(grads_and_vars, self.global_step)
 
             self.sess.run(tf.initialize_all_variables())
@@ -268,7 +297,7 @@ class WordEmbedding(object):
                 if current_step % 10000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                if current_step % 10000 == 0:
+                if current_step % 5000 == 0:
                     self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))

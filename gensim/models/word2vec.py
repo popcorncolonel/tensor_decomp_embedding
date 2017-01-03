@@ -165,6 +165,7 @@ except ImportError as E:
             else: # after sentence
                 window_pos.append(len(model.vocab) + 1) # this is the "padding" vector (</S> token)
 
+        #sent = [model.index2word[x] for x in window_pos]
         return window_pos
 
 
@@ -815,12 +816,14 @@ class Word2Vec(utils.SaveLoad):
         """
 
         if self.subspace:
-            batches = batch_generator(self, sentences, batch_size=128, n_iters=2)
+            print("using tf word embedding. n_iters in batch generator: {}".format(self.iter))
+            batches = batch_generator(self, sentences, batch_size=128, n_iters=self.iter)
 
             self.embedding_model = WordEmbedding(
                 vocab_model=self,
                 embedding_size=self.vector_size,
                 context_size=2*self.window,
+                subspace=False,
             )
             self.embedding_model.train(batches)
             self.embedding_model.set_vocab_model_embedding_matrix()
