@@ -68,12 +68,12 @@ class WordEmbedding(object):
         '''
         context_T = embedded_chars  # W (Each matrix in the batch is of shape (|C|, k))
         context_matrix = tf.transpose(context_T, perm=[0, 2, 1])  # Since these are in batches, we need to transpose each matrix in the batch. Now of shape (k, |C|). (perm=[0,2,1] because we keep the first index in place, which represents each batch)
-        lambda_ = 1
+        lambda_ = 10
         identity = tf.constant(value=lambda_*np.identity(self.context_size), dtype=tf.float32)
 
         inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
         proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
-        word_T = tf.nn.embedding_lookup(W, self.input_y)
+        word_T = tf.nn.embedding_lookup(self.word_embedding, self.input_y)
         word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
         self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
         self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
@@ -93,7 +93,7 @@ class WordEmbedding(object):
                 print("Embedding the context via subspace projection.")
                 self.embed_with_subspace_proj(self.embedded_chars)
             else:  # CBOW
-                print("Embedding the context with simple averaging.")
+                print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
 
     def create_fully_connected_layer_and_loss_fn(self, vocab_model):
@@ -119,7 +119,7 @@ class WordEmbedding(object):
             )
         self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
 
-    def create_loss(self, fc_W, fc_b, sampled_candidates):
+    def create_exponential_loss(self, fc_W, fc_b, sampled_candidates):
         '''
         Returns the per-example negative log likelihood defined exponentially. 
 
@@ -133,7 +133,6 @@ class WordEmbedding(object):
         # Look up sampled vectors
         sampled = tf.nn.embedding_lookup(fc_W, sampled_candidates)
         context_vect = self.h
-
 
         def tf_dot(x, y):
             ''' Returns the dot product of two tensorflow vectors (whose 0th axis is of dim ? because of batches). '''
@@ -154,9 +153,8 @@ class WordEmbedding(object):
             )
             sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
 
-            losses = self.create_loss(fc_W, fc_b, sampled_candidates)
+            #losses = self.create_exponential_loss(fc_W, fc_b, sampled_candidates)
 
-            '''
             losses = tf.nn.nce_loss(
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
@@ -168,9 +166,8 @@ class WordEmbedding(object):
                 remove_accidental_hits=True,
                 sampled_values=sampled_values,
             )
-            '''
             self.loss = tf.reduce_mean(losses)
-            self.loss += .01 * (tf.nn.l2_loss(self.word_embedding) + tf.nn.l2_loss(fc_W))  # regularization
+            #self.loss += .01 * (tf.nn.l2_loss(self.word_embedding) + tf.nn.l2_loss(fc_W))  # regularization
         with tf.name_scope('accuracy'), tf.device('/cpu:0'):
             self.accuracy = tf.Variable(0.0)
 

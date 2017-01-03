@@ -823,7 +823,7 @@ class Word2Vec(utils.SaveLoad):
                 vocab_model=self,
                 embedding_size=self.vector_size,
                 context_size=2*self.window,
-                subspace=False,
+                subspace=True,
             )
             self.embedding_model.train(batches)
             self.embedding_model.set_vocab_model_embedding_matrix()

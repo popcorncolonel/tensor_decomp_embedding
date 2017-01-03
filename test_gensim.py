@@ -79,6 +79,20 @@ def list_vars_in_checkpoint(dirname):
     return list_variables(abspath)
 
 
+def write_embedding_to_file(model, embedding):
+    vectors = {}
+    for word in model.vocab:
+        word_vocab = model.vocab[word]
+        word_vect = embedding[word_vocab.index]
+        vect_list = ['{:.3f}'.format(x) for x in word_vect]
+        vectors[word] = ' '.join(vect_list)
+    with open('vectors.txt', 'w') as f:
+        for word in vectors:
+            if not word:
+                continue
+            f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+
+
 def main():
     if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'vocab', load=True)
@@ -112,17 +126,8 @@ def main():
                     jpeg = sess.run(image)
                     f.write(jpeg)
 
-        vectors = {}
-        for word in model.vocab:
-            word_vocab = model.vocab[word]
-            word_vect = embedding[word_vocab.index]
-            vect_list = ['{:.3f}'.format(x) for x in word_vect]
-            vectors[word] = ' '.join(vect_list)
-        with open('vectors_w2v.txt', 'w') as f:
-            for word in vectors:
-                if not word:
-                    continue
-                f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+        write_embedding_to_file(model, embedding)
+
         sys.exit()
 
     else:
@@ -151,7 +156,11 @@ def main():
     print('Corpus: {} ({})'.format(sentences, corpus))
     print('iters: {}'.format(iters))
     print('vocab len: {}'.format(len(model.vocab)))
-
+    embedding = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="embedding/embedding_matrix")
+    embedding = embedding.eval(model.embedding_model.sess)
+    write_embedding_to_file(model, embedding)
+    print("Wrote vectors to vectors.txt")
 
 if __name__ == '__main__':
     main()
+
