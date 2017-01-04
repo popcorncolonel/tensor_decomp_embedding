@@ -91,7 +91,12 @@ def write_embedding_to_file(model, embedding):
         for word in vectors:
             if not word:
                 continue
-            f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+            try:
+                f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+            except TypeError:
+                f.write(word + ' ' + vectors[word] + '\n')
+            except:
+                pass
 
 
 def main():
