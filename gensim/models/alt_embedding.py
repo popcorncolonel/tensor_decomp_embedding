@@ -215,7 +215,8 @@ class WordEmbedding(object):
         return embedding
 
     def set_vocab_model_embedding_matrix(self):
-        embedding = self.get_embedding_matrix1()
+        #embedding = self.get_embedding_matrix1()
+        embedding = self.get_embedding_matrix2()
         self.vocab_model.syn0 = embedding
         # We must delete the syn0norm of the vocab in order to compute accuracy.
         # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
