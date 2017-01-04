@@ -28,13 +28,13 @@ class WordEmbedding(object):
         vocab_model,
         embedding_size,
         context_size,  # = 2 * vocab_model.window (= 10)
-        subspace=False,
+        method=None,
     ):
         self.vocab_model = vocab_model
         self.vocab = vocab_model.vocab
         self.embedding_size = embedding_size
         self.context_size = context_size
-        self.subspace = subspace
+        self.method = method
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
@@ -44,7 +44,7 @@ class WordEmbedding(object):
             with tf.device('/gpu:0'):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
-                self.create_embedding_layer(embedding_size)
+                self.create_embedding_layer()
                 self.create_fully_connected_layer_and_loss_fn(vocab_model)
         self.write_graph()
 
@@ -78,20 +78,55 @@ class WordEmbedding(object):
         self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
         self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
 
-    def create_embedding_layer(self, embedding_size):
+    def embed_with_tensor_train(self, r):
+        '''
+        `self.h` := U_1(i_1,:)*U_2(:,:,i_2)*U_3(:,:,i_3)*...*U_|C|(:,:,i_|C|)
+        where U_1 of shape [|V|, 1, r], U_i (1 < i < |C|) is of shape [|V|, r, r], U_|C| of shape [|V|, r, d], so the entire product is
+        of shape [1, d], as desired. (embedding lookup is done by first dimension)
+        '''
+        U_1 = tf.Variable(
+            tf.random_uniform([len(self.vocab), 1,  r], minval=-1, maxval=1),
+            name='tt_layer_1'
+        )
+        layers = [U_1]
+        for i in range(1, self.context_size-1):
+            U_i = tf.Variable(
+                tf.random_uniform([len(self.vocab), r, r], minval=-1, maxval=1),
+                name='tt_layer_{}'.format(i+1)
+            )
+            layers.append(U_i)
+        final_layer = tf.Variable(
+            tf.random_uniform([len(self.vocab), r, self.embedding_size], minval=-1, maxval=1),
+            name='tt_layer_{}'.format(self.context_size)
+        )
+        layers.append(final_layer)
+
+        def lookup(layers_index, vocab_index):
+            return tf.nn.embedding_lookup(layers[layers_index], vocab_index)
+
+        h = lookup(0, self.input_x[:, 0])
+        for i in range(1, self.context_size):
+            h = tf.batch_matmul(h, lookup(i, self.input_x[:, i]))
+        h = tf.unstack(h, axis=1)[0]  # turn the hidden output from a (?,1,300) tensor into a (?,300) tensor
+        self.h = h
+
+    def create_embedding_layer(self):
         with tf.name_scope('embedding'):
             W = tf.Variable(
                 # |V| x d embedding matrix
-                tf.random_uniform([len(self.vocab), embedding_size], minval=-1, maxval=1),
+                tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
                 name='embedding_matrix'
             )
             self.word_embedding = W
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
 
-            if self.subspace:  # Subspace
+            if self.method == 'subspace':  # Subspace
                 print("Embedding the context via subspace projection.")
                 self.embed_with_subspace_proj(self.embedded_chars)
+            elif self.method == 'tensor':  # Tensor Train
+                print("Embedding the context via Tensor Train.")
+                self.embed_with_tensor_train(r=10)
             else:  # CBOW
                 print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
