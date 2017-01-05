@@ -5,6 +5,7 @@ import time
 import os
 
 from collections import defaultdict
+import embedding_benchmarks
 
 
 class WordEmbedding(object):
@@ -50,6 +51,26 @@ class WordEmbedding(object):
 
     def write_graph(self):
         tf.train.SummaryWriter('tf/graphs', graph=self.sess.graph)
+
+    def write_embedding_to_file(self, fname='../../vectors.txt'):
+        vectors = {}
+        model = self.vocab_model
+        embedding = self.get_embedding_matrix2()
+        for word in model.vocab:
+            word_vocab = model.vocab[word]
+            word_vect = embedding[word_vocab.index]
+            vect_list = ['{:.3f}'.format(x) for x in word_vect]
+            vectors[word] = ' '.join(vect_list)
+        with open(fname, 'w') as f:
+            for word in vectors:
+                if not word:
+                    continue
+                try:
+                    f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+                except TypeError:
+                    f.write(word + ' ' + vectors[word] + '\n')
+                except:
+                    pass
 
     def embed_with_cbow(self, embedded_chars):
         '''
@@ -176,7 +197,6 @@ class WordEmbedding(object):
         return -tf_dot(context_vect, word) + tf.reduce_mean(tf.matmul(context_vect, sampled, transpose_b=True), 1)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        #with tf.name_scope('loss'), tf.device('/cpu:0'): # neg. sampling not implemented on GPU yet
         with tf.name_scope('loss'), tf.device('/gpu:0'):
             sampled_candidates, true_expected_count, sampled_expected_count = tf.nn.learned_unigram_candidate_sampler(
                 true_classes=self.input_y,
@@ -283,6 +303,20 @@ class WordEmbedding(object):
         print("(dev) {}: step {}, loss {:g}".format(time_str, step, loss))
         self.dev_summary_writer.add_summary(summaries, step)
         self.dev_summary_writer.add_summary(acc_summ, step)
+        self.evaluate()
+
+    def evaluate(self, rel_path='vectors.txt'):
+        self.write_embedding_to_file()
+        method = None
+        if self.method == 'tensor':
+            method = 'tt'
+        elif self.method == 'subspace':
+            method = 'subspace'
+        else:
+            method = 'CBOW'
+        out_fname = 'results_{}.csv'.format(method)
+        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
+        print('done evaluating.')
 
     def train(self, batches):
         with self.sess.as_default(), tf.device('/cpu:0'):
@@ -326,10 +360,10 @@ class WordEmbedding(object):
                 #if current_step % 500 == 1:
                 #    print("\nEvaluation: ")
                 #    self.dev_step(x_batch, y_batch)
-                if current_step % 10000 == 0:
+                if current_step % 20000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                if current_step % 5000 == 0:
+                if current_step % 10000 == 0:
                     self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))
