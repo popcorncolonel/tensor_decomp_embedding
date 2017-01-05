@@ -52,10 +52,11 @@ class WordEmbedding(object):
     def write_graph(self):
         tf.train.SummaryWriter('tf/graphs', graph=self.sess.graph)
 
-    def write_embedding_to_file(self, fname='../../vectors.txt'):
+    def write_embedding_to_file(self, fname='vectors.txt'):
         vectors = {}
         model = self.vocab_model
         embedding = self.get_embedding_matrix2()
+        count = 0 # number of vects written
         for word in model.vocab:
             word_vocab = model.vocab[word]
             word_vect = embedding[word_vocab.index]
@@ -67,10 +68,17 @@ class WordEmbedding(object):
                     continue
                 try:
                     f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+                    count += 1
                 except TypeError:
                     f.write(word + ' ' + vectors[word] + '\n')
+                    count += 1
                 except:
                     pass
+        with open(fname, 'r+') as f:
+            content = f.read()
+            f.seek(0, 0)
+            f.write('{} {}\n'.format(count, self.embedding_size))  # write the number of vects
+            f.write(content)
 
     def embed_with_cbow(self, embedded_chars):
         '''
@@ -363,9 +371,10 @@ class WordEmbedding(object):
                 if current_step % 20000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                if current_step % 10000 == 0:
+                if current_step % 15000 == 0:
                     self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))
+            self.evaluate()
             self.set_accuracy()
 

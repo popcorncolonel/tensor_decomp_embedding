@@ -20,7 +20,6 @@ import logging
 import os
 from web.embeddings import fetch_GloVe, load_embedding
 from web.datasets.utils import _get_dataset_dir
-
 from web.evaluate import evaluate_on_all
 
 
