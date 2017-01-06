@@ -4,6 +4,7 @@ import pickle
 import sys
 import tensorflow as tf
 import numpy as np
+import gensim.utils 
 from collections import defaultdict
 from gensim.models.word2vec import Text8Corpus
 from gensim.models.word2vec import BrownCorpus
@@ -14,18 +15,42 @@ from gensim.corpora.wikicorpus import WikiCorpus
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
 text9_loc = '/cluster/home/ebaile01/data/enwik9'
 text8_loc = '/cluster/home/ebaile01/data/enwik8'
+tokenized_wiki = '/cluster/shared/ebaile01/wiki_complete_dump_2008.txt.tokenized'
 
-corpus = 'text8'
+corpus = 'wiki'
+
+def sentences_for_tokenized_wiki():
+    with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
+        for line in f:
+            yield line.rstrip().split()
+
+g = sentences_for_tokenized_wiki()
 
 corpus_dict = {
     #'brown': (BrownCorpus(brown_loc, False), 10, 30000),
-    #'wiki': (WikiCorpus(wiki_loc), 5, 30),
+    #'wiki': (WikiCorpus(wiki_loc), 5, 30000),
     'text9': (Text8Corpus(text9_loc), 1, 30000),
     'text8': (Text8Corpus(text8_loc), 1, 30000),
+    'wiki': (sentences_for_tokenized_wiki(), 1, 100000),
 }
 
 sentences, iters, max_vocab_size = corpus_dict[corpus]
 iters = 2
+
+
+def get_model_with_vocab(fname=corpus+'vocab', load=False):
+    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=100, cbow=1)
+    if load:
+        print('depickling model...')
+        with open(fname, 'rb') as f:
+            model = pickle.load(f)
+    else:
+        print('building vocab...')
+        model.build_vocab(sentences)
+        with open(fname, 'wb') as f:
+            pickle.dump(model, f)
+    print('finished building vocab. length of vocab: {}'.format(len(model.vocab)))
+    return model
 
 
 def print_accuracy(model):
@@ -48,21 +73,6 @@ def print_accuracy(model):
     print('sem accuracy: {}/{} = {}'.format(correct['sem'], totals['sem'], correct['sem']/max(1,totals['sem'])))
     print('syn accuracy: {}/{} = {}'.format(correct['syn'], totals['syn'], correct['syn']/max(1,totals['syn'])))
     print('total accuracy: {}/{} = {}'.format(correct['total'], totals['total'], correct['total']/max(1,totals['total'])))
-
-
-def get_model_with_vocab(fname=corpus+'vocab', load=False):
-    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=100, subspace=1)
-    if load:
-        print('depickling model...')
-        with open(fname, 'rb') as f:
-            model = pickle.load(f)
-    else:
-        print('building vocab...')
-        model.build_vocab(sentences)
-        with open(fname, 'wb') as f:
-            pickle.dump(model, f)
-    print('finished building vocab. length of vocab: {}'.format(len(model.vocab)))
-    return model
 
 
 def evaluate_embedding(embedding):

@@ -77,10 +77,10 @@ if __name__ == "__main__":
         w = load_embedding(fname, format=format, normalize=True, lower=True, clean_words=options.clean_words,
                            load_kwargs=load_kwargs)
 
-    out_fname = options.output if options.output else "results.csv"
+    out_fname = options.output if options.output else "results.txt"
 
     results = evaluate_on_all(w)
 
     logger.info("Saving results...")
     print(results)
-    results.to_csv(out_fname)
+    results.to_string(out_fname)

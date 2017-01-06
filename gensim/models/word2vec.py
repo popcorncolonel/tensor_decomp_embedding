@@ -417,7 +417,7 @@ class Word2Vec(utils.SaveLoad):
             self, sentences=None, size=100, alpha=0.025, window=5, min_count=5,
             max_vocab_size=None, sample=1e-3, seed=1, workers=3, min_alpha=0.0001,
             sg=0, hs=0, negative=5, cbow_mean=1, hashfxn=hash, iter=5, null_word=0,
-            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0):
+            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0, tt=0, cbow=0):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -497,6 +497,8 @@ class Word2Vec(utils.SaveLoad):
         self.index2word = []  # map from a word's matrix index (int) to word (string)
         self.sg = int(sg)
         self.subspace = int(subspace)
+        self.tt = int(tt)
+        self.cbow = int(cbow)
         self.cum_table = None  # for negative sampling
         self.vector_size = int(size)
         self.layer1_size = int(size)
@@ -815,16 +817,31 @@ class Word2Vec(utils.SaveLoad):
 
         """
 
-        if self.subspace:
+        if self.subspace or self.tt or self.cbow:
             print("using tf word embedding. n_iters in batch generator: {}".format(self.iter))
             batches = batch_generator(self, sentences, batch_size=128, n_iters=self.iter)
 
-            self.embedding_model = WordEmbedding(
-                vocab_model=self,
-                embedding_size=self.vector_size,
-                context_size=2*self.window,
-                method='CBOW',
-            )
+            if self.subspace:
+                self.embedding_model = WordEmbedding(
+                    vocab_model=self,
+                    embedding_size=self.vector_size,
+                    context_size=2*self.window,
+                    method='subspace',
+                )
+            elif self.tt:
+                self.embedding_model = WordEmbedding(
+                    vocab_model=self,
+                    embedding_size=self.vector_size,
+                    context_size=2*self.window,
+                    method='tensor',
+                )
+            elif self.cbow:
+                self.embedding_model = WordEmbedding(
+                    vocab_model=self,
+                    embedding_size=self.vector_size,
+                    context_size=2*self.window,
+                    method='CBOW',
+                )
             self.embedding_model.train(batches)
             self.embedding_model.set_vocab_model_embedding_matrix()
             return
