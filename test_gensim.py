@@ -19,27 +19,39 @@ tokenized_wiki = '/cluster/shared/ebaile01/wiki_complete_dump_2008.txt.tokenized
 
 corpus = 'wiki'
 
-def sentences_for_tokenized_wiki():
+def sentences_for_tokenized_wiki(max_sents=5e6):
+    count = 0
+    n_tokens = 0
     with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
         for line in f:
-            yield line.rstrip().split()
+            count += 1
+            if count < max_sents:
+                sent = line.rstrip().split()
+                n_tokens += len(sent)
+                yield sent
+            else:
+                print("{} total tokens".format(n_tokens))
+                raise StopIteration
 
 g = sentences_for_tokenized_wiki()
 
 corpus_dict = {
-    #'brown': (BrownCorpus(brown_loc, False), 10, 30000),
-    #'wiki': (WikiCorpus(wiki_loc), 5, 30000),
-    'text9': (Text8Corpus(text9_loc), 1, 30000),
-    'text8': (Text8Corpus(text8_loc), 1, 30000),
-    'wiki': (sentences_for_tokenized_wiki(), 1, 100000),
+    #'brown': (BrownCorpus(brown_loc, False), 10),
+    #'wiki': (WikiCorpus(wiki_loc), 5),
+    'text9': (Text8Corpus(text9_loc), 1),
+    'text8': (Text8Corpus(text8_loc), 1),
+    'wiki': (sentences_for_tokenized_wiki(), 1),
 }
 
-sentences, iters, max_vocab_size = corpus_dict[corpus]
-iters = 2
+sentences, iters = corpus_dict[corpus]
+max_vocab_size = None
+min_count = 10
+embedding_dim = 300
 
-
-def get_model_with_vocab(fname=corpus+'vocab', load=False):
-    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=100, cbow=1)
+def get_model_with_vocab(fname=corpus+'model', load=False):
+    #model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, subspace=1, min_count=min_count)
+    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, tt=1, min_count=min_count)
+    #model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, cbow=1, min_count=min_count)
     if load:
         print('depickling model...')
         with open(fname, 'rb') as f:
@@ -111,7 +123,7 @@ def write_embedding_to_file(model, embedding):
 
 def main():
     if '--load' in sys.argv:
-        model = get_model_with_vocab(corpus+'vocab', load=True)
+        model = get_model_with_vocab(corpus+'model', load=True)
         embedding = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="embedding/embedding_matrix")
         embedding2 = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="fully_connected/W")
         saver = tf.train.Saver(write_version=tf.train.SaverDef.V2)
@@ -147,10 +159,11 @@ def main():
         sys.exit()
 
     else:
-        if '--loadvocab' not in sys.argv:
+        if '--buildvocab' in sys.argv:
             model = get_model_with_vocab()
+            sys.exit()
         else:
-            with open(corpus+'vocab', 'rb') as f:
+            with open(corpus+'model', 'rb') as f:
                 model = pickle.load(f)
 
         print('training...')

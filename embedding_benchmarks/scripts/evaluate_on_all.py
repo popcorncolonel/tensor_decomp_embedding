@@ -83,4 +83,6 @@ if __name__ == "__main__":
 
     logger.info("Saving results...")
     print(results)
-    results.to_string(out_fname)
+    with open(out_fname, 'w') as f:
+        results.to_string(f)
+

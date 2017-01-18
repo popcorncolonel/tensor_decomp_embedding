@@ -243,7 +243,10 @@ class WordEmbedding(object):
         return embedding
 
     def set_vocab_model_embedding_matrix(self):
-        embedding = self.get_embedding_matrix1()
+        if self.method in ('subspace', 'tensor'):
+            embedding = self.get_embedding_matrix2()
+        else:
+            embedding = self.get_embedding_matrix1()
         self.vocab_model.syn0 = embedding
         # We must delete the syn0norm of the vocab in order to compute accuracy.
         # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
@@ -322,7 +325,8 @@ class WordEmbedding(object):
             method = 'subspace'
         else:
             method = 'CBOW'
-        out_fname = 'results_{}.csv'.format(method)
+        #out_fname = 'results_{}.csv'.format(method)
+        out_fname = 'results_random.csv'
         os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
         print('done evaluating.')
 
@@ -365,13 +369,10 @@ class WordEmbedding(object):
                 y_batch = np.reshape(y_batch, (len(y_batch), 1))
                 self.train_step(x_batch, y_batch)
                 current_step = tf.train.global_step(self.sess, self.global_step)
-                #if current_step % 500 == 1:
-                #    print("\nEvaluation: ")
-                #    self.dev_step(x_batch, y_batch)
-                if current_step % 20000 == 0:
+                if current_step > 0 and current_step % 30000 == 0:
                     path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
                     print('Saved model checkpoint to {}'.format(path))
-                if current_step % 15000 == 0:
+                if current_step > 0 and current_step % 50000 == 0:
                     self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))
