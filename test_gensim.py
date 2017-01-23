@@ -19,7 +19,7 @@ tokenized_wiki = '/cluster/shared/ebaile01/wiki_complete_dump_2008.txt.tokenized
 
 corpus = 'wiki'
 
-def sentences_for_tokenized_wiki(max_sents=5e6):
+def sentences_for_tokenized_wiki(max_sents=3.5e6):
     count = 0
     n_tokens = 0
     with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
@@ -45,13 +45,24 @@ corpus_dict = {
 
 sentences, iters = corpus_dict[corpus]
 max_vocab_size = None
-min_count = 10
+min_count = 100
 embedding_dim = 300
 
+tt = 1
+subspace = 0
+cbow = 0
+
 def get_model_with_vocab(fname=corpus+'model', load=False):
-    #model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, subspace=1, min_count=min_count)
-    model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, tt=1, min_count=min_count)
-    #model = gensim.models.Word2Vec(iter=iters, max_vocab_size=max_vocab_size, negative=128, size=300, cbow=1, min_count=min_count)
+    model = gensim.models.Word2Vec(
+        iter=iters,
+        max_vocab_size=max_vocab_size,
+        negative=128,
+        size=embedding_dim,
+        min_count=min_count,
+        tt=tt,
+        subspace=subspace,
+        cbow=cbow,
+    )
     if load:
         print('depickling model...')
         with open(fname, 'rb') as f:

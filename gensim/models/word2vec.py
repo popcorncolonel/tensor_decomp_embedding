@@ -180,9 +180,6 @@ except ImportError as E:
         for i in range(n_iters):
             print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
             for sentence in sentences:
-                #TODO: Should we really be removing words from word_vocab? then is it really in the "context" of its
-                #TODO: surrounding words if we're removing tons of words between i. The idea is that the vast amount of data will remove insignificant words.
-                #TODO: replace with UNK token? could do experiments.
                 word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
                 for pos, word in enumerate(word_vocabs):
                     if pos < model.window:
@@ -818,7 +815,7 @@ class Word2Vec(utils.SaveLoad):
         """
 
         if self.subspace or self.tt or self.cbow:
-            print("using tf word embedding. n_iters in batch generator: {}".format(self.iter))
+            print("using tf word embedding method. n_iters in batch generator: {}".format(self.iter))
             batches = batch_generator(self, sentences, batch_size=128, n_iters=self.iter)
 
             if self.subspace:

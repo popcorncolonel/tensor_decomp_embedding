@@ -18,7 +18,6 @@ class WordEmbedding(object):
     create_loss_fn,
     get_embedding_matrix(1|2), 
     set_vocab_model_embedding_matrix, 
-    set_accuracy,
     train_set,
     dev_set,
     train,
@@ -155,7 +154,7 @@ class WordEmbedding(object):
                 self.embed_with_subspace_proj(self.embedded_chars)
             elif self.method == 'tensor':  # Tensor Train
                 print("Embedding the context via Tensor Train.")
-                self.embed_with_tensor_train(r=10)
+                self.embed_with_tensor_train(r=15)
             else:  # CBOW
                 print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
@@ -231,8 +230,6 @@ class WordEmbedding(object):
             )
             self.loss = tf.reduce_mean(losses)
             #self.loss += .01 * (tf.nn.l2_loss(self.word_embedding) + tf.nn.l2_loss(fc_W))  # regularization
-        with tf.name_scope('accuracy'), tf.device('/cpu:0'):
-            self.accuracy = tf.Variable(0.0)
 
     def get_embedding_matrix1(self):
         embedding = self.word_embedding.eval(self.sess)
@@ -248,31 +245,6 @@ class WordEmbedding(object):
         else:
             embedding = self.get_embedding_matrix1()
         self.vocab_model.syn0 = embedding
-        # We must delete the syn0norm of the vocab in order to compute accuracy.
-        # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
-        self.vocab_model.clear_sims()
-
-    def set_accuracy(self, *args, **kwargs):
-        self.set_vocab_model_embedding_matrix()
-        accuracy = self.vocab_model.accuracy('~/code/w2v_eval/questions-words.txt')
-        correct = defaultdict(float)
-        totals = defaultdict(float)
-        for d in accuracy:
-            if d['section'] == 'total':
-                correct['total'] += len(d['correct'])
-                totals['total'] += len(d['correct'])
-                totals['total'] += len(d['incorrect'])
-            elif d['section'].startswith('gram'):
-                correct['syn'] += len(d['correct'])
-                totals['syn'] += len(d['correct'])
-                totals['syn'] += len(d['incorrect'])
-            else:
-                correct['sem'] += len(d['correct'])
-                totals['sem'] += len(d['correct'])
-                totals['sem'] += len(d['incorrect'])
-        print('sem accuracy: {}/{} = {}'.format(correct['sem'], totals['sem'], correct['sem'] / max(1, totals['sem'])))
-        print('syn accuracy: {}/{} = {}'.format(correct['syn'], totals['syn'], correct['syn'] / max(1, totals['syn'])))
-        return self.accuracy.assign(correct['total'] / float(max(1, totals['total'])))
 
     def train_step(self, x_batch, y_batch, print_every=100):
         feed_dict = {
@@ -289,6 +261,7 @@ class WordEmbedding(object):
             feed_dict=feed_dict
         )
         time_str = datetime.datetime.now().isoformat()
+        self.step = step
         if step % print_every == 0:
             print("{}: step {}, loss {:g}".format(time_str, step, loss))
         self.train_summary_writer.add_summary(summaries, step)
@@ -298,26 +271,20 @@ class WordEmbedding(object):
             self.input_x: x_batch,
             self.input_y: y_batch,
         }
-        set_acc_op = self.set_accuracy()
-        step, summaries, loss, _, _, acc_summ = self.sess.run(
+        summaries, loss = self.sess.run(
             [
-                self.global_step,
                 self.loss_summary,
                 self.loss,
-                set_acc_op,
-                self.accuracy,
-                self.acc_summary,
             ],
-            feed_dict=feed_dict
+            feed_dict=feed_dict,
         )
         time_str = datetime.datetime.now().isoformat()
-        print("(dev) {}: step {}, loss {:g}".format(time_str, step, loss))
-        self.dev_summary_writer.add_summary(summaries, step)
-        self.dev_summary_writer.add_summary(acc_summ, step)
+        print("(dev) {}: step {}, loss {:g}".format(time_str, self.step, loss))
+        self.dev_summary_writer.add_summary(summaries, self.step)
         self.evaluate()
 
     def evaluate(self, rel_path='vectors.txt'):
-        self.write_embedding_to_file()
+        self.write_embedding_to_file(fname=rel_path)
         method = None
         if self.method == 'tensor':
             method = 'tt'
@@ -325,8 +292,7 @@ class WordEmbedding(object):
             method = 'subspace'
         else:
             method = 'CBOW'
-        #out_fname = 'results_{}.csv'.format(method)
-        out_fname = 'results_random.csv'
+        out_fname = 'results_iter{}_{}.txt'.format(self.step, method)
         os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
         print('done evaluating.')
 
@@ -338,7 +304,6 @@ class WordEmbedding(object):
             print('Writing summaries to {}.'.format(out_dir))
 
             self.loss_summary = tf.scalar_summary('loss', self.loss)
-            self.acc_summary = tf.scalar_summary('accuracy', self.accuracy)
             self.train_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph)
             self.dev_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph)
 
@@ -352,6 +317,7 @@ class WordEmbedding(object):
 
         with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            self.step = 0
 
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
@@ -367,15 +333,14 @@ class WordEmbedding(object):
             for batch in batches:
                 x_batch, y_batch = zip(*batch)
                 y_batch = np.reshape(y_batch, (len(y_batch), 1))
+                if self.step % 50000 == 0:
+                    self.dev_step(x_batch, y_batch)
+                #if self.step > 0 and self.step % 30000 == 0:
+                #    path = self.saver.save(self.sess, checkpoint_prefix, global_step=self.step)
+                #    print('Saved model checkpoint to {}'.format(path))
                 self.train_step(x_batch, y_batch)
                 current_step = tf.train.global_step(self.sess, self.global_step)
-                if current_step > 0 and current_step % 30000 == 0:
-                    path = self.saver.save(self.sess, checkpoint_prefix, global_step=current_step)
-                    print('Saved model checkpoint to {}'.format(path))
-                if current_step > 0 and current_step % 50000 == 0:
-                    self.dev_step(x_batch, y_batch)
             path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
             print('Saved FINAL model checkpoint to {}'.format(path))
             self.evaluate()
-            self.set_accuracy()
 
