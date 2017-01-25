@@ -99,12 +99,22 @@ def print_accuracy(model):
 
 
 def evaluate_embedding(embedding):
+    '''
     model = get_model_with_vocab(load=True)
     model.syn0 = embedding
     # We must delete the syn0norm of the vocab in order to compute accuracy.
     # Because if it already has a syn0norm, it will keep using that value and not use the new embedding.
     model.clear_sims()
     print_accuracy(model)
+    '''
+
+    model = get_model_with_vocab(load=True)
+    rel_path = 'vectors.txt'
+    write_embedding_to_file(model, embedding)
+    method = 'TT_MEAN'
+    out_fname = 'results_{}.txt'.format(method)
+    os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
+    print('done evaluating.')
 
 
 def list_vars_in_checkpoint(dirname):
@@ -113,40 +123,62 @@ def list_vars_in_checkpoint(dirname):
     return list_variables(abspath)
 
 
-def write_embedding_to_file(model, embedding):
+def write_embedding_to_file(model, embedding, fname='vectors.txt'):
     vectors = {}
     for word in model.vocab:
         word_vocab = model.vocab[word]
         word_vect = embedding[word_vocab.index]
         vect_list = ['{:.3f}'.format(x) for x in word_vect]
         vectors[word] = ' '.join(vect_list)
-    with open('vectors.txt', 'w') as f:
+    count = 0
+    with open(fname, 'w') as f:
         for word in vectors:
             if not word:
                 continue
             try:
                 f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
+                count += 1
             except TypeError:
                 f.write(word + ' ' + vectors[word] + '\n')
+                count += 1
             except:
                 pass
+    with open(fname, 'r+') as f:
+        content = f.read()
+        f.seek(0, 0)
+        f.write('{} {}\n'.format(count, embedding_dim))  # write the number of vects
+        f.write(content)
 
 
 def main():
     if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'model', load=True)
-        embedding = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="embedding/embedding_matrix")
-        embedding2 = tf.Variable(tf.random_uniform([len(model.vocab), 100]), name="fully_connected/W")
+        vocab_len = len(model.vocab)
+        #embedding = tf.Variable(tf.random_uniform([vocab_len, embedding_dim]), name="embedding/embedding_matrix")
+        embedding2 = tf.Variable(tf.random_uniform([vocab_len, embedding_dim]), name="fully_connected/W")
+        tt_layers = [tf.Variable(tf.random_uniform([vocab_len, 1, 15]), name='embedding/tt_layer_1')]
+        for i in range(2, 10):
+            tt_layers.append(tf.Variable(tf.random_uniform([vocab_len, 15, 15]), name='embedding/tt_layer_{}'.format(i)))
+        tt_layers.append(tf.Variable(tf.random_uniform([vocab_len, 15, embedding_dim]), name='embedding/tt_layer_10'))
         saver = tf.train.Saver(write_version=tf.train.SaverDef.V2)
         with tf.Session() as sess:
-            saver.restore(sess, 'tf/text8_subspace100/checkpoints/model-163478')
-            print(list_vars_in_checkpoint('tf/text8_subspace100/checkpoints/model-163478'))
-            #print(list_vars_in_checkpoint('tf/2017-01-01 12:14:59.907021/checkpoints/model-163478'))
-            embedding = embedding.eval(sess)
-            embedding2 = embedding2.eval(sess)
+            checkpoint_loc = 'tf/tt_15/checkpoints/model-371672'
+            print(list_vars_in_checkpoint(checkpoint_loc))
+            saver.restore(sess, checkpoint_loc)
+            tt_layers = [x.eval(sess) for x in tt_layers]
+            accum_matrix = tt_layers[1]
+            for i in range(2, 9):
+                accum_matrix = np.einsum('ijk,ilj->ikl', accum_matrix, tt_layers[i])
+                #accum_matrix = np.dot(accum_matrix, tt_layers[i])
+            accum_matrix = np.einsum('ikj,ijl->ikl', accum_matrix, tt_layers[9])
+            embedding = np.mean(accum_matrix, axis=1)
+            import pdb; pdb.set_trace()
+            print(accum_matrix.shape)
+            #embedding2 = embedding2.eval(sess)
 
             print('evaluating...')
         evaluate_embedding(embedding)
+        sys.exit()
         evaluate_embedding(embedding2)
         def save_sent_jpeg(sentence, fname):
             sentence = sentence.split()
