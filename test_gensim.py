@@ -15,7 +15,7 @@ from gensim.corpora.wikicorpus import WikiCorpus
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
 text9_loc = '/cluster/home/ebaile01/data/enwik9'
 text8_loc = '/cluster/home/ebaile01/data/enwik8'
-tokenized_wiki = '/cluster/shared/ebaile01/wiki_complete_dump_2008.txt.tokenized'
+tokenized_wiki = '/home/eric/code/wiki_complete_dump_2008.txt.tokenized'
 
 corpus = 'wiki'
 
@@ -38,8 +38,8 @@ g = sentences_for_tokenized_wiki()
 corpus_dict = {
     #'brown': (BrownCorpus(brown_loc, False), 10),
     #'wiki': (WikiCorpus(wiki_loc), 5),
-    'text9': (Text8Corpus(text9_loc), 1),
-    'text8': (Text8Corpus(text8_loc), 1),
+    #'text9': (Text8Corpus(text9_loc), 1),
+    #'text8': (Text8Corpus(text8_loc), 1),
     'wiki': (sentences_for_tokenized_wiki(), 1),
 }
 
@@ -48,9 +48,9 @@ max_vocab_size = None
 min_count = 100
 embedding_dim = 300
 
-tt = 1
+tt = 0
 subspace = 0
-cbow = 0
+cbow = 1
 
 def get_model_with_vocab(fname=corpus+'model', load=False):
     model = gensim.models.Word2Vec(

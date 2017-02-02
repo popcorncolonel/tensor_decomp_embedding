@@ -293,7 +293,7 @@ class WordEmbedding(object):
         else:
             method = 'CBOW'
         out_fname = 'results_iter{}_{}.txt'.format(self.step, method)
-        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
+        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
         print('done evaluating.')
 
     def train(self, batches):
