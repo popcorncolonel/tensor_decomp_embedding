@@ -219,8 +219,7 @@ def main():
             model.train(sentences, batches=batches)
         elif tensor_decomp:
             batches = batch_generator(model, sentences, batch_size=4096, n_iters=iters, fixed_size=False)
-            embedding = TensorEmbedding(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='adam')
-            #embedding = TensorEmbeddingNumpy(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='2sgd')
+            embedding = TensorEmbedding(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='2sgd')
             embedding.train(batches)
         print('finished training!')
 

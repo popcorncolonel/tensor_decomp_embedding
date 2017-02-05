@@ -128,40 +128,110 @@ class CPDecomp(object):
         '''
         See 2SGD algorithm in Expected Tensor Decomp paper
         '''
+        def gamma(A,B):
+            ATA = tf.matmul(A,A, transpose_a=True)  # A^T * A
+            BTB = tf.matmul(B,B, transpose_a=True)  # B^T * B
+            return tf.multiply(ATA, BTB)  # hadamard product of A^T*A and B^T*B
+
         X = self.X_t
         U = self.U
         V = self.V
         W = self.W
         t = self.global_step
-        eta_t = 1. / (1. + t)
+        alpha = .5
+        eta_t = 1. / (1. + t**alpha)
 
-        # X(.,V,W)_ir = sum_{j,k} X_ijk * V_jr * W_kr
-        import pdb; pdb.set_trace()
-        modified_X = tf.einsum('ijk,jr,kr->ir', X, V, W)
-
-        def contract_X(X, V, W):
-            result = tf.Variable(tf.zeros(shape=[self.shape[0], self.rank]), name='XVW')
-            # TODO: generalize to X(U.W) and X(UV.)
+        def contract_X_U(X, V, W):
+            '''
+            X(.,V,W)_ir = sum_{j,k} X_ijk * V_jr * W_kr
+            '''
             values = X.values
             indices = tf.transpose(X.indices)
 
             i_s = tf.gather(indices, 0)
             j_s = tf.gather(indices, 1)
             k_s = tf.gather(indices, 2)
-            # TODO: do it out :)
-            # for each (value, index) pair, add to result_ir
-            for value, index in values, indices:
-                result[index.i, :] += value * tf.multiply(v[index.j], w[index.k])
 
-        def gamma(A,B):
-            ATA = tf.matmul(A,A, transpose_a=True)  # A^T * A
-            BTB = tf.matmul(B,B, transpose_a=True)  # B^T * B
-            return tf.multiply(ATA, BTB)  # hadamard product of A^T*A and B^T*B
+            # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(V, j_s)), X.values))
+            each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(W, k_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
+            index_mappings = []
+            for i in range(self.shape[0]):
+                idx_i = tf.where(tf.equal(i_s, i))  # this is potentially n^2 (if tf implements `where` naively)
+                contracted_vects_for_i = tf.gather(each_contracted_vector, idx_i)  # of shape (#nonzeroes, 1, R)
+                index_mappings.append(tf.reduce_sum(contracted_vects_for_i, axis=[0,1]))  # remove the #nonzeroes and the 1
+            # Now index_mappings is a length-I list of R-dimensional vectors
+            result = tf.stack(index_mappings, name='X_VW')  # IxR!
+            return result
 
+        def contract_X_V(X, U, W):
+            '''
+            X(U,.,W)_jr = sum_{i,k} X_ijk * U_ir * W_kr
+            '''
+            values = X.values
+            indices = tf.transpose(X.indices)
+
+            i_s = tf.gather(indices, 0)
+            j_s = tf.gather(indices, 1)
+            k_s = tf.gather(indices, 2)
+
+            # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
+            each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(W, k_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
+            index_mappings = []
+            for j in range(self.shape[1]):
+                idx_j = tf.where(tf.equal(j_s, j))  # this is potentially n^2 (if tf implements `where` naively)
+                contracted_vects_for_j = tf.gather(each_contracted_vector, idx_j)  # of shape (#nonzeroes, 1, R)
+                index_mappings.append(tf.reduce_sum(contracted_vects_for_j, axis=[0,1]))  # remove the #nonzeroes and the 1
+            # Now index_mappings is a length-J list of R-dimensional vectors
+            result = tf.stack(index_mappings, name='XU_W')  # JxR!
+            return result
+
+        def contract_X_W(X, U, V):
+            '''
+            X(U,V,.)_kr = sum_{i,j} X_ijk * U_ir * V_jr
+            '''
+            values = X.values
+            indices = tf.transpose(X.indices)
+
+            i_s = tf.gather(indices, 0)
+            j_s = tf.gather(indices, 1)
+            k_s = tf.gather(indices, 2)
+
+            # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
+            each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(V, j_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
+            index_mappings = []
+            for k in range(self.shape[2]):
+                idx_k = tf.where(tf.equal(k_s, k))  # this is potentially n^2 (if tf implements `where` naively)
+                contracted_vects_for_k = tf.gather(each_contracted_vector, idx_k)  # of shape (#nonzeroes, 1, 10)
+                index_mappings.append(tf.reduce_sum(contracted_vects_for_k, axis=[0,1]))  # remove the #nonzeroes and the 1
+            # Now index_mappings is a length-K list of R-dimensional vectors
+            result = tf.stack(index_mappings, name='XUV_')  # KxR!
+            return result
+
+        modified_X = contract_X_U(self.X_t, self.V, self.W)
         gamma_rho = gamma(V,W) + rho * tf.eye(self.rank)
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
-        grad_value = tf.matmul(modified_X, inv_gamma_rho)
-        tf.assign(U, (1-eta_t) * U + eta_t * grad_value)
+        grad_value_U = tf.matmul(modified_X, inv_gamma_rho)
+
+        modified_X = contract_X_V(self.X_t, self.U, self.W)
+        gamma_rho = gamma(U,W) + rho * tf.eye(self.rank)
+        inv_gamma_rho = tf.matrix_inverse(gamma_rho)
+        grad_value_V = tf.matmul(modified_X, inv_gamma_rho)
+
+        modified_X = contract_X_W(self.X_t, self.U, self.V)
+        gamma_rho = gamma(U,V) + rho * tf.eye(self.rank)
+        inv_gamma_rho = tf.matrix_inverse(gamma_rho)
+        grad_value_W = tf.matmul(modified_X, inv_gamma_rho)
+
+        update_U_op = tf.assign(U, (1-eta_t) * U + eta_t * grad_value_U)
+        update_V_op = tf.assign(V, (1-eta_t) * V + eta_t * grad_value_V)
+        update_W_op = tf.assign(W, (1-eta_t) * W + eta_t * grad_value_W)
+        inc_t = tf.assign(self.global_step, self.global_step+1)
+
+        update_CP_op = tf.group(update_U_op, update_V_op, update_W_op, inc_t)
+        return update_CP_op
 
     def get_train_op_sals(self):
         pass
@@ -212,9 +282,9 @@ def test_decomp():
         decomp_method = CPDecomp(
             shape=shape,
             sess=sess,
-            rank=50,
+            rank=10,
             ndims=3,
-            optimizer_type='adam',
+            optimizer_type='2sgd',
         )
         print('training!')
         decomp_method.train(sparse_batch_tensor_generator(), true_X)
