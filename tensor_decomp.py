@@ -1,22 +1,13 @@
-import itertools
-import numpy as np
-import os
 import tensorflow as tf
-from tensor_decomp import CPDecomp
-import time
 
-
-class TensorEmbedding(object):
-    def __init__(self, vocab_model, embedding_dim, window_size=10, optimizer_type='adam', ndims=2):
-        self.model = vocab_model
-        self.embedding_dim = embedding_dim
-        self.window_size = window_size  # 10 (|left context| + |right context|)
+class CPDecomp(object):
+    def __init__(self, X, rank, optimizer_type='adam'):
+        '''
+        `X` is a tensor to be decomposed
+        `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
+        '''
+        self.rank = rank
         self.optimizer_type = optimizer_type
-        self.ndims = ndims
-        if self.ndims > 3:
-            raise ValueError('As of right now, ndims can be at most 3')
-
-        self.vocab_len = len(self.model.vocab)
         # t-th batch tensor
         # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
         config = tf.ConfigProto(
@@ -44,64 +35,22 @@ class TensorEmbedding(object):
                 ), name="W")
             self.create_loss_fn(reg_param=1e-8)
 
-    def update_counts_with_sent_info(self, sent, counts):
-        """
-        `sent` is a tuple of tensors representing the word and the context.
-            For example, ([74895, 1397, 2385, 23048, 9485, 58934, 2378, 51143, 35829, 34290], 15234)
-        """
-        context_list, word = sent
-        if self.ndims == 2:
-            for context_word in context_indices:
-                context_index = (word, context_word)
-                if context_index not in counts:
-                    counts[context_index] = 1
-                else:
-                    counts[context_index] += 1
-            return counts
-        elif self.ndims == 3:
-            context_indices = itertools.product(context_list, context_list)  # e.g., [(74895, 1397), (74895, 2385), ...]
-            for context_word1, context_word2 in context_indices:
-                context_index = (word, context_word1, context_word2)
-                if context_index not in counts:
-                    counts[context_index] = 1
-                else:
-                    counts[context_index] += 1
-            return counts
+    def train_batch(self, batch):
+        pass
 
-    def train_on_batch(self, batch):
-        """
-        `batch` is a list of tuples of tensors representing the word and the context.
-            For example, [
-                ([74895, 1397, 2385, 23048, 9485, 58934, 2378, 51143, 35829, 34290], 15234), 
-                ...,
-            ]
-        """
-        ## Create input tensor
-        counts = {}
-        for sent in batch:
-            self.update_counts_with_sent_info(sent, counts)
+    def evaluate(self, X):
+        '''
+        `X` is the actual representation of `X_hat`. We return the RMSE between X_hat and X
+        returns sqrt(1/#entries * sum_{entry} (X_{entry} - X_hat_{entry})^2
 
-        # https://www.tensorflow.org/api_docs/python/io_ops/placeholders#sparse_placeholder
-        counts_iter = counts.items()
-        if self.ndims == 2:
-            sent_tensor = tf.SparseTensorValue(
-                indices=[pair for pair, _ in counts_iter], # e.g., [(15234, 74895), (15234, 2385), ...] 
-                values=[count for _, count in counts_iter],
-                shape=[self.vocab_len, self.vocab_len],
-            )
-        elif self.ndims == 3:
-            sent_tensor = tf.SparseTensorValue(
-                indices=[triple for triple, _ in counts_iter], # e.g., [(15234, 74895, 1397), (15234, 74895, 2385), ...] 
-                values=[count for _, count in counts_iter],
-                shape=[self.vocab_len, self.vocab_len, self.vocab_len],
-            )
-            # this tensor takes about .12 seconds to make. Too slow? Since we're doing hundreds of thousands of batches
+        WARNING: could use a lotta memory
+        '''
 
-        # Update the online version of the CP decomp, given a batch of words and contexts
-        ## Feed input tensor to minimization algorithm
-        self.train_step(sent_tensor)
-
-    def train_step(self, sent_tensor, print_every=10, evaluate_every=5000):
+        # X_hat ~= U x1 V x2 W - right?
+        X_hat = tf.tensordot(tf.tensordot(self.U, self.V, axes=1), self.W, axes=2)
+        return tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, X))))
+        
+    def train_step(self, sent_tensor, print_every=10):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
         feed_dict = {
@@ -138,7 +87,6 @@ class TensorEmbedding(object):
             U_vects = tf.gather(U, U_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
             V_vects = tf.gather(V, V_indices)
             W_vects = tf.gather(W, W_indices)
-            # TODO: MAKE SURE U_vects correspond to the values in X.values!!!!!!!!!!
 
             # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, V_j, W_k>, as a triple dot product (for each i,j,k in X)
             # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * V_jr * W_kr, where X.indices[m] = i,j,k.
@@ -221,46 +169,6 @@ class TensorEmbedding(object):
     def get_train_op_sgd(self):
         return self.optimizer.minimize(self.loss, global_step=self.global_step)
 
-    def write_embedding_to_file(self, fname='vectors.txt'):
-        vectors = {}
-        model = self.model
-        embedding = self.get_embedding_matrix()
-        count = 0 # number of vects written
-        for word in model.vocab:
-            word_vocab = model.vocab[word]
-            word_vect = embedding[word_vocab.index]
-            vect_list = ['{:.3f}'.format(x) for x in word_vect]
-            vectors[word] = ' '.join(vect_list)
-        with open(fname, 'w') as f:
-            for word in vectors:
-                if not word:
-                    continue
-                try:
-                    f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
-                    count += 1
-                except TypeError:
-                    f.write(word + ' ' + vectors[word] + '\n')
-                    count += 1
-                except:
-                    pass
-        with open(fname, 'r+') as f:
-            content = f.read()
-            f.seek(0, 0)
-            f.write('{} {}\n'.format(count, self.embedding_dim))  # write the number of vects
-            f.write(content)
-
-    def evaluate(self, rel_path='vectors.txt'):
-        self.write_embedding_to_file(fname=rel_path)
-        method = None
-        method = self.optimizer_type
-        out_fname = 'results_iter{}_{}.txt'.format(self.batch_num, method)
-        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
-        print('done evaluating.')
-
-    def get_embedding_matrix(self):
-        embedding = self.U.eval(self.sess)
-        return embedding
-
     def train(self, batches):
         self.batch_num = 0
         with tf.device('/gpu:0'):
@@ -275,8 +183,9 @@ class TensorEmbedding(object):
             self.sess.run(tf.initialize_all_variables())
             with self.sess.as_default():
                 for batch in batches:
-                    if self.batch_num % 500 == 0:
+                    if self.batch_num % 100 == 0:
                         self.evaluate()
                     self.train_on_batch(batch)
                     self.batch_num += 1
+
 

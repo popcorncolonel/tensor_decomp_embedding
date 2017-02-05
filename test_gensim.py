@@ -9,6 +9,9 @@ from collections import defaultdict
 from gensim.models.word2vec import Text8Corpus
 from gensim.models.word2vec import BrownCorpus
 from gensim.corpora.wikicorpus import WikiCorpus
+from gensim_utils import batch_generator
+
+from tensor_embedding import TensorEmbedding
 
 
 #brown_loc = '/home/eric/nltk_data/corpora/brown'
@@ -50,7 +53,8 @@ embedding_dim = 300
 
 tt = 0
 subspace = 0
-cbow = 1
+cbow = 0
+tensor_decomp = 1
 
 def get_model_with_vocab(fname=corpus+'model', load=False):
     model = gensim.models.Word2Vec(
@@ -210,7 +214,14 @@ def main():
                 model = pickle.load(f)
 
         print('training...')
-        model.train(sentences)
+        if tt or subspace or cbow:
+            batches = batch_generator(model, sentences, batch_size=128, n_iters=iters)
+            model.train(sentences, batches=batches)
+        elif tensor_decomp:
+            batches = batch_generator(model, sentences, batch_size=4096, n_iters=iters, fixed_size=False)
+            embedding = TensorEmbedding(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='adam')
+            #embedding = TensorEmbeddingNumpy(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='2sgd')
+            embedding.train(batches)
         print('finished training!')
 
         # model.save(corpus+'model')
