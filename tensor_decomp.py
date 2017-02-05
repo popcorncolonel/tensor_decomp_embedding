@@ -1,42 +1,42 @@
+import numpy as np
 import tensorflow as tf
+import time
 
 class CPDecomp(object):
-    def __init__(self, X, rank, optimizer_type='adam'):
+    def __init__(self, shape, rank, sess, ndims=3, optimizer_type='adam'):
         '''
-        `X` is a tensor to be decomposed
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
+        `optimizer_type` must be in ('adam', 'sgd')
+        
+        Approximates a tensor whose approximations are repeatedly fed in batch format to `self.train`
         '''
         self.rank = rank
         self.optimizer_type = optimizer_type
+        self.shape = shape
+        self.ndims = ndims
+        self.sess = sess
+
         # t-th batch tensor
         # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
-        config = tf.ConfigProto(
-            allow_soft_placement=True,
-        )
-        self.sess = tf.Session(config=config)
-        with self.sess.as_default():
-            self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array([self.vocab_len] * self.ndims, dtype=np.int64))
-            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
-            self.U = tf.Variable(tf.random_uniform(
-                shape=[self.vocab_len, self.embedding_dim],
+        self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
+        # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
+        self.U = tf.Variable(tf.random_uniform(
+            shape=[self.shape[0], self.rank],
+            minval=-1.0,
+            maxval=1.0,
+        ), name="U")
+        self.V = tf.Variable(tf.random_uniform(
+            shape=[self.shape[1], self.rank],
+            minval=-1.0,
+            maxval=1.0,
+        ), name="V")
+        if self.ndims > 2:
+            self.W = tf.Variable(tf.random_uniform(
+                shape=[self.shape[2], self.rank],
                 minval=-1.0,
                 maxval=1.0,
-            ), name="U")
-            self.V = tf.Variable(tf.random_uniform(
-                shape=[self.vocab_len, self.embedding_dim],
-                minval=-1.0,
-                maxval=1.0,
-            ), name="V")
-            if self.ndims > 2:
-                self.W = tf.Variable(tf.random_uniform(
-                    shape=[self.vocab_len, self.embedding_dim],
-                    minval=-1.0,
-                    maxval=1.0,
-                ), name="W")
-            self.create_loss_fn(reg_param=1e-8)
-
-    def train_batch(self, batch):
-        pass
+            ), name="W")
+        self.create_loss_fn(reg_param=1e-8)
 
     def evaluate(self, X):
         '''
@@ -47,14 +47,17 @@ class CPDecomp(object):
         '''
 
         # X_hat ~= U x1 V x2 W - right?
-        X_hat = tf.tensordot(tf.tensordot(self.U, self.V, axes=1), self.W, axes=2)
-        return tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, X))))
+        X_hat = tf.einsum('ir,jr,kr->ijk', self.U, self.V, self.W)
+        tf_X = tf.constant(X, dtype=tf.float32)
+        rmse = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, tf_X))))
+        rmse_val = rmse.eval()
+        print("RMSE: {}".format(rmse_val))
         
-    def train_step(self, sent_tensor, print_every=10):
+    def train_step(self, approx_tensor, print_every=10):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
         feed_dict = {
-            self.X_t: sent_tensor,
+            self.X_t: approx_tensor,
         }
         _, loss, step = self.sess.run(
             [
@@ -137,7 +140,7 @@ class CPDecomp(object):
         modified_X = tf.einsum('ijk,jr,kr->ir', X, V, W)
 
         def contract_X(X, V, W):
-            result = tf.Variable(tf.zeros(shape=[self.vocab_len, self.embedding_dim]), name='XVW')
+            result = tf.Variable(tf.zeros(shape=[self.shape[0], self.rank]), name='XVW')
             # TODO: generalize to X(U.W) and X(UV.)
             values = X.values
             indices = tf.transpose(X.indices)
@@ -155,7 +158,7 @@ class CPDecomp(object):
             BTB = tf.matmul(B,B, transpose_a=True)  # B^T * B
             return tf.multiply(ATA, BTB)  # hadamard product of A^T*A and B^T*B
 
-        gamma_rho = gamma(V,W) + rho * tf.eye(self.embedding_dim)
+        gamma_rho = gamma(V,W) + rho * tf.eye(self.rank)
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
         grad_value = tf.matmul(modified_X, inv_gamma_rho)
         tf.assign(U, (1-eta_t) * U + eta_t * grad_value)
@@ -169,7 +172,10 @@ class CPDecomp(object):
     def get_train_op_sgd(self):
         return self.optimizer.minimize(self.loss, global_step=self.global_step)
 
-    def train(self, batches):
+    def train(self, expected_tensors, true_X=None):
+        '''
+        Assumes `expected_tensors` is a generator of sparse tensor values. 
+        '''
         self.batch_num = 0
         with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
@@ -182,10 +188,39 @@ class CPDecomp(object):
 
             self.sess.run(tf.initialize_all_variables())
             with self.sess.as_default():
-                for batch in batches:
-                    if self.batch_num % 100 == 0:
-                        self.evaluate()
-                    self.train_on_batch(batch)
+                for expected_tensor in expected_tensors:
+                    if self.batch_num % 100 == 0 and true_X is not None:
+                        self.evaluate(true_X)
+                    self.train_step(expected_tensor)
                     self.batch_num += 1
 
+
+def test_decomp():
+    shape = [30, 40, 50]
+    true_X = np.random.rand(30, 40, 50)
+    batch_tensors = (true_X + (np.random.rand(30,40,50) - 0.5) for _ in range(10000))
+    def sparse_batch_tensor_generator():
+        for X_t in batch_tensors:
+            idx = tf.where(tf.not_equal(X_t, 0.0))
+            yield tf.SparseTensorValue(idx.eval(), tf.gather_nd(X_t, idx).eval(), X_t.shape)
+
+    config = tf.ConfigProto(
+        allow_soft_placement=True,
+    )
+    sess = tf.Session(config=config)
+    with sess.as_default():
+        decomp_method = CPDecomp(
+            shape=shape,
+            sess=sess,
+            rank=50,
+            ndims=3,
+            optimizer_type='adam',
+        )
+        print('training!')
+        decomp_method.train(sparse_batch_tensor_generator(), true_X)
+
+
+if __name__ == '__main__':
+    print('testing CP decomp...')
+    test_decomp()
 
