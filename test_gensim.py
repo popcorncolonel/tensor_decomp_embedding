@@ -10,9 +10,7 @@ from gensim.models.word2vec import Text8Corpus
 from gensim.models.word2vec import BrownCorpus
 from gensim.corpora.wikicorpus import WikiCorpus
 from gensim_utils import batch_generator
-
 from tensor_embedding import TensorEmbedding
-
 
 #brown_loc = '/home/eric/nltk_data/corpora/brown'
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'

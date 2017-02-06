@@ -51,17 +51,23 @@ class CPDecomp(object):
         tf_X = tf.constant(X, dtype=tf.float32)
         rmse = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, tf_X))))
         rmse_val = rmse.eval()
-        print("RMSE: {}".format(rmse_val))
-        
+        if self.results_file is not None:
+            if self.batch_num == 0:
+                print("RMSE", file=self.results_file)
+            print("{}".format(rmse_val), file=self.results_file)
+        print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
+       
     def train_step(self, approx_tensor, print_every=10):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
+            self.avg_time = 0.0
+            self.total_recordings = 0
         feed_dict = {
             self.X_t: approx_tensor,
         }
         _, loss, step = self.sess.run(
             [
-                self.train_op,
+                self.train_ops, # might need multiple train ops to be executed sequentially (see the case of sals)
                 self.loss,
                 self.global_step,
             ],
@@ -69,8 +75,12 @@ class CPDecomp(object):
         )
 
         if step % print_every == 0:
-            print("Loss at step {}: {} (avg time per batch: {})".format(step, loss, (time.time() - self.prev_time) / print_every))
+            batch_time = (time.time() - self.prev_time) / print_every
+            print("Loss at step {}: {} (avg time per batch: {})".format(step, loss, batch_time))
             self.prev_time = time.time()
+            self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
+            print("avg time: {}".format(self.avg_time))
+            self.total_recordings += 1
         
     def create_loss_fn(self, reg_param):
         """
@@ -113,20 +123,21 @@ class CPDecomp(object):
 
         self.loss = L(self.X_t, self.U,self.V,self.W) + reg(self.U, self.V, self.W)
         
-    def get_train_op(self):
-        # TODO: implement SALS or 2SGD. Also experiment with just using ADAM/SGD (builtin) to minimize the loss
+    def get_train_ops(self):
         if self.optimizer_type == '2sgd':
-            return self.get_train_op_2sgd()
+            train_ops = [self.get_train_op_2sgd()]
         elif self.optimizer_type == 'sals':
-            return self.get_train_op_sals()
+            train_ops = self.get_train_ops_sals()
         elif self.optimizer_type == 'adam':
-            return self.get_train_op_adam()
+            train_ops = [self.get_train_op_adam()]
         elif self.optimizer_type == 'sgd':
-            return self.get_train_op_sgd()
+            train_ops = [self.get_train_op_sgd()]
+        inc_t = tf.assign(self.global_step, self.global_step+1)
+        return [*train_ops, inc_t]
 
-    def get_train_op_2sgd(self, rho=1e-4):
+    def get_update_UVW_ops_for_2sgd_sals(self, rho):
         '''
-        See 2SGD algorithm in Expected Tensor Decomp paper
+        See 2SGD/SALS algorithms in Expected Tensor Decomp paper
         '''
         def gamma(A,B):
             ATA = tf.matmul(A,A, transpose_a=True)  # A^T * A
@@ -228,25 +239,31 @@ class CPDecomp(object):
         update_U_op = tf.assign(U, (1-eta_t) * U + eta_t * grad_value_U)
         update_V_op = tf.assign(V, (1-eta_t) * V + eta_t * grad_value_V)
         update_W_op = tf.assign(W, (1-eta_t) * W + eta_t * grad_value_W)
-        inc_t = tf.assign(self.global_step, self.global_step+1)
+        return [update_U_op, update_V_op, update_W_op]
 
-        update_CP_op = tf.group(update_U_op, update_V_op, update_W_op, inc_t)
+    def get_train_op_2sgd(self, rho=1e-4):
+        [update_U_op, update_V_op, update_W_op] = self.get_update_UVW_ops_for_2sgd_sals(rho)
+        # Update U,V,W simultaneously - I believe tf.group does this?
+        update_CP_op = tf.group(update_U_op, update_V_op, update_W_op)
         return update_CP_op
 
-    def get_train_op_sals(self):
-        pass
+    def get_train_ops_sals(self, rho=1e-4):
+        [update_U_op, update_V_op, update_W_op] = self.get_update_UVW_ops_for_2sgd_sals(rho)
+        # update U,V,W in order
+        return [update_U_op, update_V_op, update_W_op]
 
     def get_train_op_adam(self):
-        return self.optimizer.minimize(self.loss, global_step=self.global_step)
+        return self.optimizer.minimize(self.loss)
 
     def get_train_op_sgd(self):
-        return self.optimizer.minimize(self.loss, global_step=self.global_step)
+        return self.optimizer.minimize(self.loss)
 
-    def train(self, expected_tensors, true_X=None):
+    def train(self, expected_tensors, true_X=None, evaluate_every=100, results_file=None):
         '''
         Assumes `expected_tensors` is a generator of sparse tensor values. 
         '''
         self.batch_num = 0
+        self.results_file = results_file
         with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
             if self.optimizer_type == 'adam':
@@ -254,40 +271,85 @@ class CPDecomp(object):
             elif self.optimizer_type == 'sgd':
                 self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=1e-2)
 
-            self.train_op = self.get_train_op()
+            self.train_ops = self.get_train_ops()
 
             self.sess.run(tf.initialize_all_variables())
             with self.sess.as_default():
                 for expected_tensor in expected_tensors:
-                    if self.batch_num % 100 == 0 and true_X is not None:
+                    if self.batch_num % evaluate_every == 0 and true_X is not None:
                         self.evaluate(true_X)
                     self.train_step(expected_tensor)
                     self.batch_num += 1
+                if hasattr(self, 'avg_time') and results_file is not None:
+                    print('avg batch time: {}'.format(self.avg_time), file=results_file)
 
 
 def test_decomp():
     shape = [30, 40, 50]
-    true_X = np.random.rand(30, 40, 50)
-    batch_tensors = (true_X + (np.random.rand(30,40,50) - 0.5) for _ in range(10000))
+    true_U = np.random.rand(30, 5)
+    true_V = np.random.rand(40, 5)
+    true_W = np.random.rand(50, 5)
+    true_X = np.einsum('ir,jr,kr->ijk', true_U, true_V, true_W)
+
+    def batch_tensors_gen(n=10000):
+        for _ in range(n):
+            yield true_X + (np.random.rand(30,40,50) - 0.5) 
+
     def sparse_batch_tensor_generator():
         for X_t in batch_tensors:
             idx = tf.where(tf.not_equal(X_t, 0.0))
             yield tf.SparseTensorValue(idx.eval(), tf.gather_nd(X_t, idx).eval(), X_t.shape)
 
+    batch_tensors = batch_tensors_gen()
     config = tf.ConfigProto(
         allow_soft_placement=True,
     )
     sess = tf.Session(config=config)
     with sess.as_default():
-        decomp_method = CPDecomp(
-            shape=shape,
-            sess=sess,
-            rank=10,
-            ndims=3,
-            optimizer_type='2sgd',
-        )
-        print('training!')
-        decomp_method.train(sparse_batch_tensor_generator(), true_X)
+        print('training (on 2sgd)!')
+        with open('results_2sgd.txt', 'w') as f:
+            # train 2sgd
+            decomp_method = CPDecomp(
+                shape=shape,
+                sess=sess,
+                rank=10,
+                ndims=3,
+                optimizer_type='2sgd',
+            )
+            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
+        print('training (on sals)!')
+        with open('results_sals.txt', 'w') as f:
+            # train sals
+            decomp_method = CPDecomp(
+                shape=shape,
+                sess=sess,
+                rank=10,
+                ndims=3,
+                optimizer_type='sals',
+            )
+            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
+        print('training (on adam)!')
+        with open('results_adam.txt', 'w') as f:
+            # train adam
+            decomp_method = CPDecomp(
+                shape=shape,
+                sess=sess,
+                rank=10,
+                ndims=3,
+                optimizer_type='adam',
+            )
+            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
+        print('training (on sgd)!')
+        with open('results_sgd.txt', 'w') as f:
+            # train sgd
+            decomp_method = CPDecomp(
+                shape=shape,
+                sess=sess,
+                rank=10,
+                ndims=3,
+                optimizer_type='sgd',
+            )
+            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
 
 
 if __name__ == '__main__':
