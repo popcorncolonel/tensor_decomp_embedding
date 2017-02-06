@@ -290,17 +290,17 @@ def test_decomp():
     true_V = np.random.rand(40, 5)
     true_W = np.random.rand(50, 5)
     true_X = np.einsum('ir,jr,kr->ijk', true_U, true_V, true_W)
+    # TODO: Why does it slow down over time??? Does it do that for Adam as well?
 
-    def batch_tensors_gen(n=10000):
+    def batch_tensors_gen(n):
         for _ in range(n):
             yield true_X + (np.random.rand(30,40,50) - 0.5) 
 
-    def sparse_batch_tensor_generator():
-        for X_t in batch_tensors:
+    def sparse_batch_tensor_generator(n=1500):
+        for X_t in batch_tensors_gen(n):
             idx = tf.where(tf.not_equal(X_t, 0.0))
             yield tf.SparseTensorValue(idx.eval(), tf.gather_nd(X_t, idx).eval(), X_t.shape)
 
-    batch_tensors = batch_tensors_gen()
     config = tf.ConfigProto(
         allow_soft_placement=True,
     )

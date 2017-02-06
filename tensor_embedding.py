@@ -30,7 +30,7 @@ class TensorEmbedding(object):
                 sess=self.sess,
                 rank=embedding_dim,
                 ndims=self.ndims,
-                optimizer_type='adam',
+                optimizer_type=self.optimizer_type,
             )
 
     def write_embedding_to_file(self, fname='vectors.txt'):
@@ -123,4 +123,27 @@ class TensorEmbedding(object):
     def train(self, batches):
         converted_batch_tensors = self.convert_batches_to_sp_tensor(batches)
         self.decomp_method.train(converted_batch_tensors)
+
+
+class PPMIGatherer(object):
+    def __init__(self, vocab_model, n=2):
+        '''
+        '''
+        self.model = vocab_model
+        self.unigram_vocab = {}
+        self.num_samples = 0
+        self.vocab_len = len(vocab_model.vocab)
+        self.X = np.zeros(**(self.vocab_len)*n)
+
+    def create_count_matrix(batches):
+        '''
+        `batches` is a generator of (context, word) tuples,
+            where `context` is like [98345, 2348975, 38239, 138492, 3829, 329] (indices into the vocab) 
+            and `word` is like 3829 (index into the vocab)
+
+        '''
+        for batch in batches:
+            # TODO: fill self.X
+            self.num_samples += 1
+
 
