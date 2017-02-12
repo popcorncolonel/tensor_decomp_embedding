@@ -1,3 +1,8 @@
+from nltk.corpus import stopwords
+stopwords = set(stopwords.words('english'))
+grammar_stopwords = {',', "''", '``', '.', 'the'}
+stopwords = stopwords.union(grammar_stopwords)
+
 def get_context_matrix(model, word_vocabs, word_index, fixed_size=True, padding_words=False):
     """
     `word_index` is the index in word_vocabs where the target word appears.
@@ -12,8 +17,8 @@ def get_context_matrix(model, word_vocabs, word_index, fixed_size=True, padding_
             continue
         if 0 <= i < len(word_vocabs):
             window_pos.append(word_vocabs[i].index)
-            assert word_vocabs[i] != len(model.vocab)
-            assert word_vocabs[i] != len(model.vocab) + 1
+            #assert word_vocabs[i] != len(model.vocab)
+            #assert word_vocabs[i] != len(model.vocab) + 1
         elif i < 0: # before sentence
             if fixed_size and padding_words:
                 window_pos.append(len(model.vocab)) # this is a "padding" vector (<S> token)
@@ -29,7 +34,7 @@ def get_target_y(word_vocabs, word_index):
     return word_vocabs[word_index].index
 
 
-def batch_generator(model, sentences, batch_size=512, n_iters=None, fixed_size=True, randomize=False):
+def batch_generator(model, sentences, batch_size=512, n_iters=1, fixed_size=True, randomize=False, remove_stopwords=False):
     '''
     if `fixed_size` is True, sentences will only include words and contexts in the middle of sentences
         (because the first word in the sentence doesn't have 5 words before it)
@@ -40,9 +45,12 @@ def batch_generator(model, sentences, batch_size=512, n_iters=None, fixed_size=T
         n_iters = model.iter
     batch = []
     for i in range(n_iters):
-        print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
+        #print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
         for sentence in sentences:
-            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
+            if remove_stopwords:
+                word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab and w not in stopwords]
+            else:
+                word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
             for pos, word in enumerate(word_vocabs):
                 if fixed_size:
                     if pos < model.window:
@@ -53,10 +61,12 @@ def batch_generator(model, sentences, batch_size=512, n_iters=None, fixed_size=T
                 word_matrix = get_context_matrix(model, word_vocabs, pos, fixed_size=fixed_size)
                 target_y = get_target_y(word_vocabs, pos)
                 batch.append((word_matrix, target_y))
-                if len(batch) == batch_size:
-                    if randomize:
-                        random.shuffle(batch)
-                    #import pdb; pdb.set_trace()
-                    yield batch
-                    batch = []
+            if len(batch) >= batch_size:
+                if randomize:
+                    random.shuffle(batch)
+                #import pdb; pdb.set_trace()
+                yield batch
+                batch = []
+        if batch:
+            yield batch
 

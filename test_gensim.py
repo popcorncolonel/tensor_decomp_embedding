@@ -1,7 +1,9 @@
 import os
 import gensim
-import pickle
+#import pickle
+import _pickle as pickle
 import sys
+import time
 import tensorflow as tf
 import numpy as np
 import gensim.utils 
@@ -10,7 +12,13 @@ from gensim.models.word2vec import Text8Corpus
 from gensim.models.word2vec import BrownCorpus
 from gensim.corpora.wikicorpus import WikiCorpus
 from gensim_utils import batch_generator
-from tensor_embedding import TensorEmbedding
+from tensor_embedding import TensorEmbedding, PMIGatherer, PpmiSvdEmbedding
+from tensor_decomp import CPDecomp
+
+from nltk.corpus import stopwords
+stopwords = set(stopwords.words('english'))
+grammar_stopwords = {',', "''", '``', '.', 'the'}
+stopwords = stopwords.union(grammar_stopwords)
 
 #brown_loc = '/home/eric/nltk_data/corpora/brown'
 #wiki_loc = '/home/eric/Downloads/enwiki-latest-pages-articles.xml.bz2'
@@ -20,14 +28,18 @@ tokenized_wiki = '/home/eric/code/wiki_complete_dump_2008.txt.tokenized'
 
 corpus = 'wiki'
 
-def sentences_for_tokenized_wiki(max_sents=3.5e6):
+def sentences_for_tokenized_wiki(max_sents=3.5e6, remove_stopwords=True):
     count = 0
     n_tokens = 0
     with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
         for line in f:
             count += 1
             if count < max_sents:
+                if 'olela' in line or 'lakou' in line:  # some hawaiian snuck into this wiki dump...
+                    continue
                 sent = line.rstrip().split()
+                if remove_stopwords:
+                    sent = [w for w in sent if w not in stopwords]
                 n_tokens += len(sent)
                 yield sent
             else:
@@ -54,7 +66,7 @@ subspace = 0
 cbow = 0
 tensor_decomp = 1
 
-def get_model_with_vocab(fname=corpus+'model', load=False):
+def get_model_with_vocab(fname=corpus+'model', load=False, sentences=sentences, min_count=min_count):
     model = gensim.models.Word2Vec(
         iter=iters,
         max_vocab_size=max_vocab_size,
@@ -100,7 +112,7 @@ def print_accuracy(model):
     print('total accuracy: {}/{} = {}'.format(correct['total'], totals['total'], correct['total']/max(1,totals['total'])))
 
 
-def evaluate_embedding(embedding):
+def evaluate_embedding(embedding, method):
     '''
     model = get_model_with_vocab(load=True)
     model.syn0 = embedding
@@ -113,7 +125,6 @@ def evaluate_embedding(embedding):
     model = get_model_with_vocab(load=True)
     rel_path = 'vectors.txt'
     write_embedding_to_file(model, embedding)
-    method = 'TT_MEAN'
     out_fname = 'results_{}.txt'.format(method)
     os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /cluster/home/ebaile01/code/gensim/{} -o /cluster/home/ebaile01/code/gensim/results/{}'.format(rel_path, out_fname))
     print('done evaluating.')
@@ -152,6 +163,8 @@ def write_embedding_to_file(model, embedding, fname='vectors.txt'):
         f.write(content)
 
 
+
+
 def main():
     if '--load' in sys.argv:
         model = get_model_with_vocab(corpus+'model', load=True)
@@ -181,7 +194,6 @@ def main():
             print('evaluating...')
         evaluate_embedding(embedding)
         sys.exit()
-        evaluate_embedding(embedding2)
         def save_sent_jpeg(sentence, fname):
             sentence = sentence.split()
             model.syn0 = embedding
@@ -204,19 +216,124 @@ def main():
         sys.exit()
 
     else:
+        max_sents = 2e5
+        min_count = 50
+        sentences = sentences_for_tokenized_wiki(max_sents=max_sents)
         if '--buildvocab' in sys.argv:
-            model = get_model_with_vocab()
-            sys.exit()
+            model = get_model_with_vocab(sentences=sentences, min_count=min_count)
+        elif '--loadppmitensor' in sys.argv:
+            with open(corpus+'model', 'rb') as f:
+                model = pickle.load(f)
+            with open('1M_sent_3d_vals.pkl', 'rb') as f:
+                vals = pickle.load(f)
+            with open('1M_sent_3d_indices.pkl', 'rb') as f:
+                indices = pickle.load(f)
+            shape = (len(model.vocab),) * 3
+            ppmi_sp_tensor = tf.SparseTensorValue(indices, vals, shape)
+            def gen():
+                for _ in range(1000):
+                    print('feeding it for the {}th time'.format(_))
+                    yield ppmi_sp_tensor
+            batches = gen()
+            config = tf.ConfigProto(
+                allow_soft_placement=True,
+            )
+            sess = tf.Session(config=config)
+            with sess.as_default():
+                embedding = CPDecomp(shape=shape, rank=embedding_dim, sess=sess, optimizer_type='2sgd')
+                embedding.train(batches)
+                embedding_mat = embedding.U
+                import pdb; pdb.set_trace()
+                pass
         else:
             with open(corpus+'model', 'rb') as f:
                 model = pickle.load(f)
 
+        # TODO: multithread all of this (joblib?) - we have 56 cores. use 50 of them?
+        import tracemalloc
+        tracemalloc.start()
+        gatherer = PMIGatherer(model, n=3)
+        if '--gathercounts' in sys.argv or '--buildvocab' in sys.argv:
+            batches = batch_generator(model, sentences_for_tokenized_wiki(max_sents=max_sents), batch_size=10000, fixed_size=False)
+            gatherer.populate_counts(batches)
+            '''
+            with open('{}sent_gatherer.pkl'.format(max_sents), 'wb') as f:
+                print('dumping to file...')
+                import gc
+                t = time.time()
+                gc.disable()
+                pickle.dump(gatherer, f, protocol=4)
+                gc.enable()
+                print('dumping took {} secs'.format(time.time() - t))
+            '''
+        else:
+            '''
+            print('loading gatherer...')
+            with open('{}sent_gatherer.pkl'.format(max_sents), 'rb') as f:
+                import gc
+                t = time.time()
+                gc.disable()
+                gatherer = pickle.load(f)
+                gc.enable()
+                print('loading took {} secs'.format(time.time() - t))
+            '''
+        batches = batch_generator(model, sentences_for_tokenized_wiki(max_sents=max_sents), batch_size=3000, fixed_size=False)
+
+        def sparse_tensor_batches():
+            for batch in batches:
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, numpy_dense_tensor=False, debug=False)
+                yield sparse_ppmi_tensor
+
+        print('starting CP Decomp training')
+
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+        )
+        sess = tf.Session(config=config)
+        with sess.as_default():
+            decomp_method = CPDecomp(shape=(len(model.vocab),)*3, rank=embedding_dim, sess=sess, optimizer_type='2sgd')
+        print('starting training...')
+        decomp_method.train(sparse_tensor_batches())
+        try:
+            embedding = decomp_method.U.eval(sess)
+        except:
+            embedding = decomp_method.U.eval()
+
+        evaluate_embedding(embedding, method='ppmi_cp_decomp')
+
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+        print("[ Top 10 ]")
+        for stat in top_stats[:10]:
+            print(stat)
+
+        import pdb; pdb.set_trace()
+        
+        embedding_model = PpmiSvdEmbedding(model, embedding_dim=embedding_dim)
+        print("calculating SVD...")
+        t = time.time()
+        embedding_model.learn_embedding(sparse_ppmi_tensor)
+        total_svd_time = time.time() - t
+        print("SVD on {}x{} took {}s".format(len(model.vocab), len(model.vocab), total_svd_time))
+        embedding_model.evaluate()
+        try:
+            with open('1M_tensor_model_mincount50.pkl', 'wb') as f:
+                pickle.dump(sparse_ppmi_tensor, f)
+        except:
+            pass
+        try:
+            with open('1M_embedding_mincount50.pkl', 'wb') as f:
+                pickle.dump(embedding_model.embedding, f)
+        except:
+            pass
+            
+        sys.exit()
         print('training...')
         if tt or subspace or cbow:
-            batches = batch_generator(model, sentences, batch_size=128, n_iters=iters)
-            model.train(sentences, batches=batches)
+            batches = batch_generator(model, sentences_for_tokenized_wiki(max_sents=3.5e6), batch_size=128, n_iters=iters)
+            model.train(sentences_for_tokenized_wiki(max_sents=3.5e6), batches=batches)
         elif tensor_decomp:
-            batches = batch_generator(model, sentences, batch_size=4096, n_iters=iters, fixed_size=False)
+            batches = batch_generator(model, sentences_for_tokenized_wiki(max_sents=3.5e6), batch_size=4096, n_iters=iters, fixed_size=False)
             embedding = TensorEmbedding(vocab_model=model, embedding_dim=embedding_dim, optimizer_type='2sgd')
             embedding.train(batches)
         print('finished training!')

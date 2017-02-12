@@ -3,10 +3,10 @@ import tensorflow as tf
 import time
 
 class CPDecomp(object):
-    def __init__(self, shape, rank, sess, ndims=3, optimizer_type='adam'):
+    def __init__(self, shape, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
-        `optimizer_type` must be in ('adam', 'sgd')
+        `optimizer_type` must be in ('adam', 'sgd', 'sals', '2sgd')
         
         Approximates a tensor whose approximations are repeatedly fed in batch format to `self.train`
         '''
@@ -36,7 +36,7 @@ class CPDecomp(object):
                 minval=-1.0,
                 maxval=1.0,
             ), name="W")
-        self.create_loss_fn(reg_param=1e-8)
+        self.create_loss_fn(reg_param=reg_param)
 
     def evaluate(self, X):
         '''
@@ -81,6 +81,7 @@ class CPDecomp(object):
             self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
             print("avg time: {}".format(self.avg_time))
             self.total_recordings += 1
+            print("self.U: ", self.U.eval())
         
     def create_loss_fn(self, reg_param):
         """
@@ -91,26 +92,28 @@ class CPDecomp(object):
             """
             X is a sparse tensor. U,V,W are dense. 
             """
-            X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
-            indices = tf.transpose(X.indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
 
-            U_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
-            V_indices = tf.gather(indices, 1)
-            W_indices = tf.gather(indices, 2) # there better be an error!
-            U_vects = tf.gather(U, U_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
-            V_vects = tf.gather(V, V_indices)
-            W_vects = tf.gather(W, W_indices)
+            with tf.device('/cpu:0'):
+                X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
+                indices = tf.transpose(X.indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
 
-            # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, V_j, W_k>, as a triple dot product (for each i,j,k in X)
-            # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * V_jr * W_kr, where X.indices[m] = i,j,k.
-            elementwise_product = tf.multiply(tf.multiply(U_vects, V_vects), W_vects)  # of shape (N, R)
-                                                                                
-            predicted_X_ijks = tf.reduce_sum(elementwise_product, axis=1)  # of shape (N,) - represents Sum_{r=1}^R U_ir V_jr W_kr
-            errors = tf.square(X_ijks - predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
+                U_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
+                V_indices = tf.gather(indices, 1)
+                W_indices = tf.gather(indices, 2) # there better be an error!
+                U_vects = tf.gather(U, U_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
+                V_vects = tf.gather(V, V_indices)
+                W_vects = tf.gather(W, W_indices)
 
-            mean_loss = .5 * tf.reduce_sum(errors)  # average loss per entry in X - scalar!
+                # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, V_j, W_k>, as a triple dot product (for each i,j,k in X)
+                # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * V_jr * W_kr, where X.indices[m] = i,j,k.
+                elementwise_product = tf.multiply(tf.multiply(U_vects, V_vects), W_vects)  # of shape (N, R)
+                                                                                    
+                predicted_X_ijks = tf.reduce_sum(elementwise_product, axis=1)  # of shape (N,) - represents Sum_{r=1}^R U_ir V_jr W_kr
+                errors = tf.square(X_ijks - predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
 
-            return mean_loss
+                mean_loss = .5 * tf.reduce_mean(errors)  # average loss per entry in X - scalar!
+
+                return mean_loss
 
         def reg(U,V,W):
             # NOTE: l2_loss already squares the norms. So we don't need to square them.
@@ -121,7 +124,10 @@ class CPDecomp(object):
             )
             return (.5 * reg_param) * summed_norms
 
-        self.loss = L(self.X_t, self.U,self.V,self.W) + reg(self.U, self.V, self.W)
+        if reg_param > 0.0:
+            self.loss = L(self.X_t, self.U,self.V,self.W) + reg(self.U, self.V, self.W)
+        else:
+            self.loss = L(self.X_t, self.U,self.V,self.W)
         
     def get_train_ops(self):
         if self.optimizer_type == '2sgd':
@@ -223,18 +229,23 @@ class CPDecomp(object):
 
         modified_X = contract_X_U(self.X_t, self.V, self.W)
         gamma_rho = gamma(V,W) + rho * tf.eye(self.rank)
+        self.gr1 = gamma_rho
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
+        self.gr1inv = gamma_rho
         grad_value_U = tf.matmul(modified_X, inv_gamma_rho)
 
         modified_X = contract_X_V(self.X_t, self.U, self.W)
         gamma_rho = gamma(U,W) + rho * tf.eye(self.rank)
+        self.gr2 = gamma_rho
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
         grad_value_V = tf.matmul(modified_X, inv_gamma_rho)
 
         modified_X = contract_X_W(self.X_t, self.U, self.V)
         gamma_rho = gamma(U,V) + rho * tf.eye(self.rank)
+        self.gr3 = gamma_rho
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
         grad_value_W = tf.matmul(modified_X, inv_gamma_rho)
+        # could try a try:except? if except just ignore this batch? BUT MAKE SURE IT DOESNT HAPPEN TOO OFTEN. if except count > 100, wtf
 
         update_U_op = tf.assign(U, (1-eta_t) * U + eta_t * grad_value_U)
         update_V_op = tf.assign(V, (1-eta_t) * V + eta_t * grad_value_V)
@@ -264,7 +275,9 @@ class CPDecomp(object):
         '''
         self.batch_num = 0
         self.results_file = results_file
+        num_invalid_arg_exceptions = 0
         with tf.device('/gpu:0'):
+            print('setting up variables...')
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
             if self.optimizer_type == 'adam':
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
@@ -273,12 +286,20 @@ class CPDecomp(object):
 
             self.train_ops = self.get_train_ops()
 
-            self.sess.run(tf.initialize_all_variables())
+            print('initializing variables...')
+            self.sess.run(tf.global_variables_initializer())
             with self.sess.as_default():
+                print('looping through batches...')
                 for expected_tensor in expected_tensors:
                     if self.batch_num % evaluate_every == 0 and true_X is not None:
                         self.evaluate(true_X)
-                    self.train_step(expected_tensor)
+                    try:
+                        self.train_step(expected_tensor)
+                    except tf.errors.InvalidArgumentError as e:
+                        self.batch_num -= 1
+                        num_invalid_arg_exceptions += 1
+                        print("INVALID ARG EXCEPTION: {}. Accidentally noninvertible matrix? There have been {} of these.".format(e, num_invalid_arg_exceptions))
+                        import pdb; pdb.set_trace()
                     self.batch_num += 1
                 if hasattr(self, 'avg_time') and results_file is not None:
                     print('avg batch time: {}'.format(self.avg_time), file=results_file)
