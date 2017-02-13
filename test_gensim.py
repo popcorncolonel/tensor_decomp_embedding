@@ -7,7 +7,7 @@ import sys
 import time
 import tensorflow as tf
 
-from gensim_utils import batch_generator
+from gensim_utils import batch_generator, batch_generator2
 from tensor_embedding import TensorEmbedding, PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp
 from nltk.corpus import stopwords
@@ -141,16 +141,20 @@ class GensimSandbox(object):
         self.embedding = self.model.syn0
 
     def train_tensor_decomp_embedding(self):
-        batches = batch_generator(self.model, self.sentences_generator(), batch_size=10000, fixed_size=False)  # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
+        batches = batch_generator2(self.model, self.sentences_generator(), batch_size=1000)  # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
         gatherer = PMIGatherer(self.model, n=3)
         gatherer.populate_counts(batches)
 
-        def sparse_tensor_batches(batch_size=3000):
-            batches = batch_generator(self.model, self.sentences_generator(), batch_size=batch_size, fixed_size=False)
+        def sparse_tensor_batches(batch_size=1000):
+            ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
+            batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, numpy_dense_tensor=False, debug=False)
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=False)
                 yield sparse_ppmi_tensor
 
+        for sp_tensor in sparse_tensor_batches():
+            pass
+        sys.exit()
         print('starting CP Decomp training')
 
         config = tf.ConfigProto(
@@ -191,8 +195,8 @@ class GensimSandbox(object):
 
 def main():
     method = 'cp_decomp'
-    num_sents = 5e5
-    min_count = 100
+    num_sents = 1e5
+    min_count = 10
 
     sandbox = GensimSandbox(
         method=method,

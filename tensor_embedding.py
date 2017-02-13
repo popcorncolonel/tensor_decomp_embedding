@@ -92,7 +92,7 @@ class TensorEmbedding(object):
         """
         context_list, word = sent
         if self.ndims == 2:
-            for context_word in context_indices:
+            for context_word in context_list:
                 context_index = (word, context_word)
                 if context_index not in counts:
                     counts[context_index] = 1
@@ -161,6 +161,7 @@ class PMIGatherer(object):
         self.model = vocab_model
         self.vocab_len = len(self.model.vocab)
         self.n = n
+        self.debug = True
 
     def P(self, x):
         '''
@@ -214,60 +215,90 @@ class PMIGatherer(object):
         pass
 
     def get_indices(self, batch, update_uni_counts=False):
+        '''
+        We are assuming each sent chunk in each batch we want to keep the co-occurrence count of.
+        '''
         # TODO: make it a set of indices, which are all ordered in ascending order, then just permute everything at lookup time?
         #       i.e. if indices = {(1,2,3)}, the indices gets expanded to [(1,2,3), (2,1,3), (3,2,1), ..., (1,3,2)] and the corresponding PMI vals get added
-        #       This decreases computation time for PMI? But increases computation time for sorting everything according to (1,2,3)
+        #       This decreases computation time (and ram) for PMI? But increases computation time for sorting everything according to (1,2,3)
         indices = []
-        for context, word in batch:
-            product_producer = itertools.product(context, repeat=self.n-1)
-            if update_uni_counts:  # for efficiency -- only wanna loop through this once
-                self.uni_counts[word] += 1
-            for product_tuple in product_producer:
-                index = (word, *product_tuple) 
-                if len(set(index)) == self.n:  # only capture the "interesting" (non-repetitive) co-occurrences
-                    indices.append(index)
+        for sent_chunk in batch:
+            sent = sorted(list(set(sent_chunk)))
+            if len(sent) < 3:
+                continue
+            for i in range(len(sent)-2):
+                for j in range(i+1, len(sent)):
+                    for k in range(j+1, len(sent)):
+                        index = (sent[i], sent[j], sent[k]) 
+                        indices.append(index)
+                if update_uni_counts:  # for efficiency -- only wanna loop through this once
+                    self.uni_counts[sent[i]] += 1
+            if update_uni_counts:  # since we don't loop through the last 2 elements
+                self.uni_counts[sent[-2]] += 1
+                self.uni_counts[sent[-1]] += 1
+        #for context, word in batch:
+            #product_producer = itertools.product(context, repeat=self.n-1)
+            #for product_tuple in product_producer:
         return indices
 
     def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False):
         print('Creating Sparse PMI tensor...')
+        t = time.time()
         if batch:
             indices = self.get_indices(batch)
+            indices = list(set(indices))
         else:
             indices = list(self.n_counts.keys())
 
         print('filling values...')
-        values = np.zeros(len(indices)) 
-        t = time.time()
+        values = np.zeros(len(indices), dtype=np.float32) 
         for i in range(len(indices)):
             values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
-        print('pmi conversion took {} secs'.format(time.time() - t))
         # TODO: Why are all the PMI values positive? Is this bad?
-        #print("done calculating PMI values")
         shape = (self.vocab_len,) * self.n
+        indices = np.asarray(indices, dtype=np.uint16)
+        num_total_vals = len(values)
+        if positive:
+            positive_args = np.argwhere(values > 0.0)
+            indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])
+            values = np.squeeze(values[positive_args])
+            print('{} nonzero pmi\'s out of {} total'.format(len(values), num_total_vals))
+        if debug and self.debug:
+            # self.debug so we can turn it off (in pdb) whever we want
+            t = time.time()
+            import heapq
+            print('Getting top 200 PMIs...')
+            top_k = heapq.nlargest(200, zip(values,indices), key=lambda x: x[0])
+            top_k_pairs = sorted(list(set([(tuple(sorted(ix)), val) for (val,ix) in top_k])), key=lambda x: x[1])
+            top_k_pairs_words = [((self.model.index2word[x[0]], self.model.index2word[x[1]], self.model.index2word[x[2]]), val) for (x, val) in top_k_pairs]
+            print(top_k_pairs_words)
+            print('n largest took {} sec'.format(time.time() - t))
+            import pdb; pdb.set_trace()
+            pass
+        # TODO: vectorize this
+        indices_extended = np.zeros((3*2*len(indices), 3), dtype=np.uint16)
+        values_extended = np.zeros((3*2*len(indices),), dtype=np.float32)
+        for i in range(len(indices)):
+            tup = indices[i]
+            j = 0
+            for perm in itertools.permutations(range(3)):
+                indices_extended[6*i+j][perm[0]] = tup[0]
+                indices_extended[6*i+j][perm[1]] = tup[1]
+                indices_extended[6*i+j][perm[2]] = tup[2]
+                values_extended[6*i+j] = values[i]
+                j += 1
+        del indices
+        del values
+        indices = indices_extended
+        values = values_extended
         if numpy_dense_tensor:
             ''' Probably not gonna wanna do this if you're bigger than 2 dimensions. '''
             ppmi_tensor = np.zeros(shape)
             for val, ix in zip(values, indices):
                 ppmi_tensor[ix] += val
             return ppmi_tensor
-        indices = np.asarray(indices)
-        if debug:
-            t = time.time()
-            import heapq
-            print('getting top 50...')
-            top_k = heapq.nlargest(50, zip(values,indices), key=lambda x: x[0])
-            top_k_pairs = list(set([tuple(ix) for (val,ix) in top_k]))
-            top_k_pairs_words = [(self.model.index2word[x[0]], self.model.index2word[x[1]], self.model.index2word[x[2]]) for x in top_k_pairs]
-            print(top_k_pairs_words)
-            print('n largest took {} sec'.format(time.time() - t))
-            import pdb; pdb.set_trace()
-            import sys; sys.exit()
-        num_total_vals = len(values)
-        if positive:
-            positive_args = np.argwhere(values > 0.0)
-            indices = indices[positive_args]
-            values = values[positive_args]
-            print('{} nonzero pmi\'s out of {} total'.format(len(values), num_total_values))
+        print('total #values in tensor: {}'.format(len(indices)))
+        print('sparse tensor creation took {} secs'.format(time.time() - t))
         sparse_tensor = tf.SparseTensorValue(indices, values, shape)
         return sparse_tensor
         
