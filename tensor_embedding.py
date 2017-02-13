@@ -180,19 +180,6 @@ class PMIGatherer(object):
         If n=3, PMI(x,y,z) = log(#(x,y,z) * |D|^2 / (#(x)#(y)#(z)))
                            = log(#(x,y,z)) + 2*log(|D|) - log(#(x)) - log(#(y)) - log(#(z))
         """
-        """
-        assert len(args) == self.n
-        num = self.P(args)
-        denom = np.prod([self.P(arg) for arg in args])
-        pmi = np.log2(num / denom)
-        """
-        '''
-        np.seterr(all='print')
-        if abs(self.n_counts[args] - 0.0) < .00000001 or any(abs(self.uni_counts[arg] - 0.0) < .00000001 for arg in args):
-            print("COUNT OF SOMETHING == 0?????????")
-            print("args: {}".format(args))
-            import pdb; pdb.set_trace()
-        '''
         log_num = np.log2(self.n_counts[args]) + (self.n - 1)*np.log2(self.num_samples)
         log_denom = 0.0
         for arg in args:
@@ -208,7 +195,6 @@ class PMIGatherer(object):
 
         '''
         print('Gathering counts...')
-        # TODO: do this faster. with numpy arrays. remove as many for loops as possible. actually idk if you can get faster with the n-grams w/o making a dense matrix. can you?
         self.num_samples = 0
         self.uni_counts = defaultdict(int)
         self.n_counts = defaultdict(int)
@@ -250,12 +236,12 @@ class PMIGatherer(object):
             indices = list(self.n_counts.keys())
 
         print('filling values...')
-        values = np.zeros(len(indices))  # TODO: WHY IS THIS SO SLOW AFTER THE FIRST ITERATION? iter 0: 10secs. iter 1: 1128 secs. iter 2: 1428 secs. ????????????
+        values = np.zeros(len(indices)) 
         t = time.time()
         for i in range(len(indices)):
-            values[i] += self.PMI(*indices[i])
+            values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
         print('pmi conversion took {} secs'.format(time.time() - t))
-        # TODO: Why are all the PMI values positive????
+        # TODO: Why are all the PMI values positive? Is this bad?
         #print("done calculating PMI values")
         shape = (self.vocab_len,) * self.n
         if numpy_dense_tensor:
