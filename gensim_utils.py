@@ -70,3 +70,26 @@ def batch_generator(model, sentences, batch_size=512, n_iters=1, fixed_size=True
         if batch:
             yield batch
 
+def batch_generator2(model, sentences, batch_size=512, randomize=False, remove_stopwords=False):
+    '''
+    Outputs sentences in chunks of 11. No word/context pairs or anything. 
+    '''
+    batch = []
+    def append_chunks(l, n):
+        for i in range(0, len(l), n):
+            batch.append(l[i:i+n])
+    for sentence in sentences:
+        if remove_stopwords:
+            words = [model.vocab[w].index for w in sentence if w in model.vocab and w not in stopwords]
+        else:
+            words = [model.vocab[w].index for w in sentence if w in model.vocab]
+        append_chunks(words, 1 + 2*model.window)
+        if len(batch) >= batch_size:
+            if randomize:
+                random.shuffle(batch)
+            #import pdb; pdb.set_trace()
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+

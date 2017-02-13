@@ -322,19 +322,39 @@ def evaluate_similarity(w, X, y):
     if isinstance(w, dict):
         w = Embedding.from_dict(w)
 
+    total_words = 0
     missing_words = 0
     words = w.vocabulary.word_id
     for query in X:
         for query_word in query:
+            total_words += 1
             if query_word not in words:
                 missing_words += 1
     if missing_words > 0:
-        logger.warning("Missing {} words. Will replace them with mean vector".format(missing_words))
+        print("Missing {} words out of {} total words in test ({}% of words are missing).".format(missing_words, total_words, missing_words / total_words * 100.0))
+        #logger.warning("Missing {} words. Will replace them with mean vector".format(missing_words))
 
 
+    '''
     mean_vector = np.mean(w.vectors, axis=0, keepdims=True)
     A = np.vstack(w.get(word, mean_vector) for word in X[:, 0])
     B = np.vstack(w.get(word, mean_vector) for word in X[:, 1])
+    scores = np.array([v1.dot(v2.T) for v1, v2 in zip(A, B)])
+    return scipy.stats.spearmanr(scores, y).correlation
+    '''
+    words = zip(X[:, 0], X[:, 1])
+    A = []
+    B = []
+    new_y = []
+    for (w1, w2), score in zip(words, y):
+        if w1 in w and w2 in w:
+            A.append(w[w1])
+            B.append(w[w2])
+            new_y.append(score)
+    A = np.vstack(A)
+    B = np.vstack(B)
+    y = np.vstack(new_y)
+    assert len(A) == len(B) == len(y)
     scores = np.array([v1.dot(v2.T) for v1, v2 in zip(A, B)])
     return scipy.stats.spearmanr(scores, y).correlation
 
