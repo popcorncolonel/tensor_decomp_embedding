@@ -149,12 +149,9 @@ class GensimSandbox(object):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=True)
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=False)
                 yield sparse_ppmi_tensor
 
-        for sp_tensor in sparse_tensor_batches():
-            pass
-        sys.exit()
         print('starting CP Decomp training')
 
         config = tf.ConfigProto(
