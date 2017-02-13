@@ -145,11 +145,11 @@ class GensimSandbox(object):
         gatherer = PMIGatherer(self.model, n=3)
         gatherer.populate_counts(batches)
 
-        def sparse_tensor_batches(batch_size=1000):
+        def sparse_tensor_batches(batch_size=2000):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=False)
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=True)
                 yield sparse_ppmi_tensor
 
         for sp_tensor in sparse_tensor_batches():
@@ -195,7 +195,7 @@ class GensimSandbox(object):
 
 def main():
     method = 'cp_decomp'
-    num_sents = 1e5
+    num_sents = 5e5
     min_count = 10
 
     sandbox = GensimSandbox(

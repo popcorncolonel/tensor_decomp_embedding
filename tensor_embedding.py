@@ -168,7 +168,6 @@ class PMIGatherer(object):
         MLE for probabilities: #(x)/|D|
 
         '''
-        # TODO: maybe do some smoothing?
         if isinstance(x, tuple):  # n-gram probability
             assert len(x) == self.n
             return self.n_counts[x] / self.num_samples
@@ -218,9 +217,9 @@ class PMIGatherer(object):
         '''
         We are assuming each sent chunk in each batch we want to keep the co-occurrence count of.
         '''
-        # TODO: make it a set of indices, which are all ordered in ascending order, then just permute everything at lookup time?
+        # set of indices, which are all ordered in ascending order, then we just permute everything at lookup time
         #       i.e. if indices = {(1,2,3)}, the indices gets expanded to [(1,2,3), (2,1,3), (3,2,1), ..., (1,3,2)] and the corresponding PMI vals get added
-        #       This decreases computation time (and ram) for PMI? But increases computation time for sorting everything according to (1,2,3)
+        #       This decreases computation time (and ram) for PMI. But (negligibly) increases computation time for sorting everything according to (1,2,3)
         indices = []
         for sent_chunk in batch:
             sent = sorted(list(set(sent_chunk)))
@@ -254,7 +253,6 @@ class PMIGatherer(object):
         values = np.zeros(len(indices), dtype=np.float32) 
         for i in range(len(indices)):
             values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
-        # TODO: Why are all the PMI values positive? Is this bad?
         shape = (self.vocab_len,) * self.n
         indices = np.asarray(indices, dtype=np.uint16)
         num_total_vals = len(values)
@@ -269,13 +267,12 @@ class PMIGatherer(object):
             import heapq
             print('Getting top 200 PMIs...')
             top_k = heapq.nlargest(200, zip(values,indices), key=lambda x: x[0])
-            top_k_pairs = sorted(list(set([(tuple(sorted(ix)), val) for (val,ix) in top_k])), key=lambda x: x[1])
+            top_k_pairs = sorted(list(set([(tuple(ix), val) for (val,ix) in top_k])), key=lambda x: x[1])
             top_k_pairs_words = [((self.model.index2word[x[0]], self.model.index2word[x[1]], self.model.index2word[x[2]]), val) for (x, val) in top_k_pairs]
             print(top_k_pairs_words)
             print('n largest took {} sec'.format(time.time() - t))
             import pdb; pdb.set_trace()
             pass
-        # TODO: vectorize this
         indices_extended = np.zeros((3*2*len(indices), 3), dtype=np.uint16)
         values_extended = np.zeros((3*2*len(indices),), dtype=np.float32)
         for i in range(len(indices)):

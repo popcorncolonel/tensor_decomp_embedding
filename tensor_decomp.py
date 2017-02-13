@@ -155,7 +155,7 @@ class CPDecomp(object):
         V = self.V
         W = self.W
         t = self.global_step
-        alpha = .5
+        alpha = .3  # smaller => decays slower (more quickly get updates from the gradients)
         eta_t = 1. / (1. + t**alpha)
 
         def contract_X_U(X, V, W):
