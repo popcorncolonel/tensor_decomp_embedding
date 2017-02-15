@@ -368,7 +368,7 @@ class Word2Vec(utils.SaveLoad):
             self, sentences=None, size=100, alpha=0.025, window=5, min_count=5,
             max_vocab_size=None, sample=1e-3, seed=1, workers=3, min_alpha=0.0001,
             sg=0, hs=0, negative=5, cbow_mean=1, hashfxn=hash, iter=5, null_word=0,
-            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0, tt=0, cbow=0):
+            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0, tt=0, cbow=0, bigramcbow=0):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -445,11 +445,14 @@ class Word2Vec(utils.SaveLoad):
             logger.debug('Fast version of {0} is being used'.format(__name__))
 
         self.vocab = {}  # mapping from a word (string) to a Vocab object
+        self.bigram_vocab = {}  # mapping from a tuple of words word (string) to an index
         self.index2word = []  # map from a word's matrix index (int) to word (string)
+        self.index2bigram = []  # map from a word's matrix index (int) to bigram (tuple)
         self.sg = int(sg)
         self.subspace = int(subspace)
         self.tt = int(tt)
         self.cbow = int(cbow)
+        self.bigramcbow = int(bigramcbow)
         self.cum_table = None  # for negative sampling
         self.vector_size = int(size)
         self.layer1_size = int(size)
@@ -547,6 +550,22 @@ class Word2Vec(utils.SaveLoad):
         self.scale_vocab(keep_raw_vocab=keep_raw_vocab, trim_rule=trim_rule, update=update)  # trim by min_count & precalculate downsampling
         self.finalize_vocab(update=update)  # build tables & arrays
 
+    def build_bigram_vocab(self, sentences):
+        """
+        Build the bigram vocabulary from a sequence of sentences (can be a once-only generator stream).
+        Each sentence must be a list of unicode strings.
+        """
+        bigram_count = 0
+        for sent in sentences:
+            sent = [w for w in sent if w in self.vocab]
+            for i in range(len(sent)-1):
+                bigram = (sent[i], sent[i+1])
+                if bigram not in self.bigram_vocab:
+                    self.bigram_vocab[bigram] = bigram_count
+                    bigram_count += 1
+        self.bigram_count = bigram_count
+        print('Build bigram vocab! bigram count = {}'.format(bigram_count))
+            
     def scan_vocab(self, sentences, progress_per=10000, trim_rule=None, update=False):
         """Do an initial scan of all words appearing in sentences."""
         logger.info("collecting all words and their counts")
@@ -768,7 +787,7 @@ class Word2Vec(utils.SaveLoad):
 
         """
 
-        if self.subspace or self.tt or self.cbow:
+        if self.subspace or self.tt or self.cbow or self.bigramcbow:
             assert batches
             print("using tf word embedding method. n_iters in batch generator: {}".format(self.iter))
 
@@ -792,6 +811,13 @@ class Word2Vec(utils.SaveLoad):
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='CBOW',
+                )
+            elif self.bigramcbow:
+                self.embedding_model = WordEmbedding(
+                    vocab_model=self,
+                    embedding_size=self.vector_size,
+                    context_size=2*self.window,
+                    method='bigram-cbow',
                 )
             self.embedding_model.train(batches)
             self.embedding_model.set_vocab_model_embedding_matrix()

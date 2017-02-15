@@ -9,20 +9,6 @@ import embedding_benchmarks
 
 
 class WordEmbedding(object):
-    """
-      Methods:
-    __init__,
-    write_graph,
-    create_embedding_layer,
-    create_fully_connected_layer_and_loss_fn,
-    create_loss_fn,
-    get_embedding_matrix(1|2), 
-    set_vocab_model_embedding_matrix, 
-    train_set,
-    dev_set,
-    train,
-    """
-
     def __init__(
         self,
         vocab_model,
@@ -49,7 +35,7 @@ class WordEmbedding(object):
         self.write_graph()
 
     def write_graph(self):
-        tf.train.SummaryWriter('tf/graphs', graph=self.sess.graph)
+        tf.summary.FileWriter('tf/graphs', graph=self.sess.graph)
 
     def write_embedding_to_file(self, fname='vectors.txt'):
         vectors = {}
@@ -84,10 +70,15 @@ class WordEmbedding(object):
         Given the embedding of the input, embeds the hidden layer with the formulation in CBOW
         '''
         self.embedding_b = tf.Variable(
-            tf.constant(0., shape=[self.embedding_size]),
-            name='b'
+            tf.constant(0., shape=[self.embedding_size], dtype=tf.float32),
+            name='b',
+            dtype=tf.float32,
         )
-        self.h = tf.reduce_mean(embedded_chars, 1) + self.embedding_b
+        #self.h = tf.reduce_mean(embedded_chars, 1) + self.embedding_b
+        self.h = tf.reduce_mean(embedded_chars, 1)
+
+    def embed_with_bigramcbow(self, embedded_chars):
+        return self.embed_with_cbow(embedded_chars)
 
     def embed_with_subspace_proj(self, embedded_chars):
         '''
@@ -140,14 +131,28 @@ class WordEmbedding(object):
 
     def create_embedding_layer(self):
         with tf.name_scope('embedding'):
-            W = tf.Variable(
+            if self.method == 'bigram-cbow':
+                assert self.vocab_model.bigram_count > 0, "Bigram vocabulary not build properly."
+                # #bigrams x d embedding matrix
+                with tf.device('/gpu:0'):
+                    C = tf.Variable(
+                        tf.truncated_normal(
+                            shape=[self.vocab_model.bigram_count, self.embedding_size],
+                            stddev=0.01,
+                            dtype=tf.float32,
+                        ),
+                        name='embedding_matrix',
+                        dtype=tf.float32,
+                    )
+            else:
                 # |V| x d embedding matrix
-                tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
-                name='embedding_matrix'
-            )
-            self.word_embedding = W
+                C = tf.Variable(
+                    tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
+                    name='embedding_matrix'
+                )
+            self.context_embedding = C
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
-            self.embedded_chars = tf.nn.embedding_lookup(W, self.input_x)
+            self.embedded_chars = tf.nn.embedding_lookup(C, self.input_x)
 
             if self.method == 'subspace':  # Subspace
                 print("Embedding the context via subspace projection.")
@@ -155,6 +160,9 @@ class WordEmbedding(object):
             elif self.method == 'tensor':  # Tensor Train
                 print("Embedding the context via Tensor Train.")
                 self.embed_with_tensor_train(r=15)
+            elif self.method == 'bigram-cbow':  # bigram-cbow
+                print("Embedding the context with bigram averaging (bigram-cbow).")
+                self.embed_with_bigramcbow(self.embedded_chars)
             else:  # CBOW
                 print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
@@ -162,7 +170,7 @@ class WordEmbedding(object):
     def create_fully_connected_layer_and_loss_fn(self, vocab_model):
         with tf.name_scope('fully_connected'):
             '''
-            self.fc_W = self.word_embedding
+            self.fc_W = self.context_embedding
             self.embedding_b = tf.Variable(
                 tf.constant(0., shape=[self.embedding_size]),
                 name='b'
@@ -172,36 +180,18 @@ class WordEmbedding(object):
             self.fc_W = tf.Variable(
                 tf.truncated_normal(
                     shape=[len(self.vocab), self.embedding_size],
-                    stddev=0.01
+                    stddev=0.01,
+                    dtype=tf.float32,
                 ),
                 name='W',
+                dtype=tf.float32,
             )
             self.fc_b = tf.Variable(
-                tf.constant(0., shape=[len(self.vocab)]),
+                tf.constant(0., shape=[len(self.vocab)], dtype=tf.float32),
                 name='b',
+                dtype=tf.float32,
             )
         self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
-
-    def create_exponential_loss(self, fc_W, fc_b, sampled_candidates):
-        '''
-        Returns the per-example negative log likelihood defined exponentially. 
-
-        i.e., -log(exp(context . word)) + sum_{w'} log(exp(context . w')) = -context . word + sum_{w'} context . w'
-        We are trying to minimize this value. 
-        '''
-        # TODO: What should we be doing with fc_b?
-        # Look up true vector
-        word = tf.nn.embedding_lookup(fc_W, self.input_y)
-        word = tf.unstack(word, axis=1)[0]  # turn the hidden output from a (?,1,300) tensor into a (?,300) tensor
-        # Look up sampled vectors
-        sampled = tf.nn.embedding_lookup(fc_W, sampled_candidates)
-        context_vect = self.h
-
-        def tf_dot(x, y):
-            ''' Returns the dot product of two tensorflow vectors (whose 0th axis is of dim ? because of batches). '''
-            return tf.reduce_sum(tf.mul(x,y), 1)
-
-        return -tf_dot(context_vect, word) + tf.reduce_mean(tf.matmul(context_vect, sampled, transpose_b=True), 1)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
         with tf.name_scope('loss'), tf.device('/gpu:0'):
@@ -221,7 +211,7 @@ class WordEmbedding(object):
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
                 biases=fc_b,
-                inputs=self.h,
+                inputs=tf.cast(self.h, tf.float32),
                 labels=self.input_y,
                 num_sampled=self.vocab_model.negative,
                 num_classes=len(vocab_model.vocab),
@@ -229,10 +219,10 @@ class WordEmbedding(object):
                 sampled_values=sampled_values,
             )
             self.loss = tf.reduce_mean(losses)
-            #self.loss += .01 * (tf.nn.l2_loss(self.word_embedding) + tf.nn.l2_loss(fc_W))  # regularization
+            #self.loss += .01 * (tf.nn.l2_loss(self.context_embedding) + tf.nn.l2_loss(fc_W))  # regularization
 
     def get_embedding_matrix1(self):
-        embedding = self.word_embedding.eval(self.sess)
+        embedding = self.context_embedding.eval(self.sess)
         return embedding
 
     def get_embedding_matrix2(self):
@@ -240,13 +230,13 @@ class WordEmbedding(object):
         return embedding
 
     def set_vocab_model_embedding_matrix(self):
-        if self.method in ('subspace', 'tensor'):
+        if self.method in ('subspace', 'tensor', 'cbow', 'bigram-cbow'):
             embedding = self.get_embedding_matrix2()
         else:
             embedding = self.get_embedding_matrix1()
         self.vocab_model.syn0 = embedding
 
-    def train_step(self, x_batch, y_batch, print_every=100):
+    def train_step(self, x_batch, y_batch, print_every=50):
         feed_dict = {
             self.input_x: x_batch,
             self.input_y: y_batch,
@@ -303,44 +293,45 @@ class WordEmbedding(object):
             out_dir = os.path.abspath(os.path.join(os.path.curdir, 'tf', timestamp))
             print('Writing summaries to {}.'.format(out_dir))
 
-            self.loss_summary = tf.scalar_summary('loss', self.loss)
-            self.train_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph)
-            self.dev_summary_writer = tf.train.SummaryWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph)
+            self.loss_summary = tf.summary.scalar('loss', self.loss)
+            self.train_summary_writer = tf.summary.FileWriter(os.path.join(out_dir, 'summaries', 'train'), self.sess.graph)
+            self.dev_summary_writer = tf.summary.FileWriter(os.path.join(out_dir, 'summaries', 'dev'), self.sess.graph)
 
             checkpoint_dir = os.path.abspath(os.path.join(out_dir, 'checkpoints'))
             checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
 
             if not os.path.exists(checkpoint_dir):
                 os.makedirs(checkpoint_dir)
-            self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2)
+            self.saver = tf.train.Saver(tf.global_variables(), write_version=tf.train.SaverDef.V2)
             ######## /Misc housekeeping ###########
 
         with tf.device('/gpu:0'):
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
             self.step = 0
 
+        with tf.device('/gpu:0'):
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
 
             self.train_op = optimizer.apply_gradients(grads_and_vars, self.global_step)
 
-            self.sess.run(tf.initialize_all_variables())
-            # TODO: look into using pre-trained values for our first word embedding.
+        self.sess.run(tf.global_variables_initializer())
+        # TODO: look into using pre-trained values for our first word embedding.
 
-            self.word_index = 0
-            self.sent_index = 0
-            self.start_time = None
-            for batch in batches:
-                x_batch, y_batch = zip(*batch)
-                y_batch = np.reshape(y_batch, (len(y_batch), 1))
-                if self.step % 50000 == 0:
-                    self.dev_step(x_batch, y_batch)
-                #if self.step > 0 and self.step % 30000 == 0:
-                #    path = self.saver.save(self.sess, checkpoint_prefix, global_step=self.step)
-                #    print('Saved model checkpoint to {}'.format(path))
-                self.train_step(x_batch, y_batch)
-                current_step = tf.train.global_step(self.sess, self.global_step)
-            path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
-            print('Saved FINAL model checkpoint to {}'.format(path))
-            self.evaluate()
+        self.word_index = 0
+        self.sent_index = 0
+        self.start_time = None
+        for batch in batches:
+            x_batch, y_batch = zip(*batch)
+            y_batch = np.reshape(y_batch, (len(y_batch), 1))
+            if self.step % 5000 == 1:
+                self.dev_step(x_batch, y_batch)
+            #if self.step > 0 and self.step % 30000 == 0:
+            #    path = self.saver.save(self.sess, checkpoint_prefix, global_step=self.step)
+            #    print('Saved model checkpoint to {}'.format(path))
+            self.train_step(x_batch, y_batch)
+            current_step = tf.train.global_step(self.sess, self.global_step)
+        path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
+        print('Saved FINAL model checkpoint to {}'.format(path))
+        self.evaluate()
 
