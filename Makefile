@@ -1,8 +1,8 @@
 all:
-	time python3 test_gensim.py
+	python3 -m pdb -c continue test_gensim.py
 buildvocab:
-	time python3 test_gensim.py --buildvocab
-load_non_interactive:
-	time python3 test_gensim.py --load
-interactive:
-	time python3 test_gensim.py --load
+	python3 -m pdb -c continue test_gensim.py --buildvocab
+cp:
+	python3 -m pdb -c continue test_gensim.py --method=cp_decomp --min_count=420 --num_sents=5e6 --buildvocab
+load:
+	python3 -m pdb -c continue test_gensim.py --method=cp_decomp --min_count=420 --num_sents=5e6

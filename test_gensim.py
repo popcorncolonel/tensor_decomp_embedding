@@ -7,7 +7,7 @@ import sys
 import time
 import tensorflow as tf
 
-from gensim_utils import batch_generator, batch_generator2
+from gensim_utils import batch_generator, batch_generator2, bigram_batch_generator
 from tensor_embedding import TensorEmbedding, PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp
 from nltk.corpus import stopwords
@@ -20,7 +20,7 @@ stopwords = stopwords.union(grammar_stopwords)
 
 class GensimSandbox(object):
     def __init__(self, method, num_sents=1e6, embedding_dim=300, min_count=100):
-        assert method in ('tt', 'subspace', 'cbow', 'cp_decomp')
+        assert method in ('tt', 'subspace', 'cbow', 'cp_decomp', 'bigram-cbow')
         self.method = method
         self.embedding_dim = embedding_dim
         self.min_count = min_count
@@ -35,7 +35,7 @@ class GensimSandbox(object):
         self.sess = None
         self.embedding = None
 
-    def sentences_generator(self, num_sents=None, remove_stopwords=True):
+    def sentences_generator_old(self, num_sents=None, remove_stopwords=True):
         if num_sents is None:
             num_sents = self.num_sents
         tokenized_wiki = '/home/eric/code/wiki_complete_dump_2008.txt.tokenized'
@@ -56,9 +56,24 @@ class GensimSandbox(object):
                     print("{} total tokens".format(n_tokens))
                     raise StopIteration
 
-    def get_model_with_vocab(self, sentences=None, fname='wikimodel'):
-        if not sentences:
-            sentences = self.sentences_generator()
+    def sentences_generator(self, num_sents=None):
+        if num_sents is None:
+            num_sents = self.num_sents
+        tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # also has stopwords and hawaiian removed
+        count = 0
+        n_tokens = 0
+        with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
+            for line in f:
+                if count < num_sents:
+                    count += 1
+                    sent = line.rstrip().split()
+                    n_tokens += len(sent)
+                    yield sent
+                else:
+                    print("{} total tokens".format(n_tokens))
+                    raise StopIteration
+
+    def get_model_with_vocab(self, fname='wikimodel'):
         model = gensim.models.Word2Vec(
             iter=1,
             max_vocab_size=None,
@@ -72,9 +87,14 @@ class GensimSandbox(object):
             model.subspace = 1
         elif self.method == 'cbow':
             model.cbow = 1
+        elif self.method == 'bigram-cbow':
+            model.bigramcbow = 1
         if self.buildvocab:
             print('building vocab...')
-            model.build_vocab(sentences)
+            model.build_vocab(self.sentences_generator())
+            if self.method == 'bigram-cbow':
+                print('building bigram vocab...')
+                model.build_bigram_vocab(self.sentences_generator())
             with open(fname, 'wb') as f:
                 pickle.dump(model, f)
         else:
@@ -126,7 +146,11 @@ class GensimSandbox(object):
 
     def train_gensim_embedding(self):
         print('training...')
-        batches = batch_generator(self.model, self.sentences_generator, batch_size=128, n_iters=iters)
+        if self.method == 'bigram-cbow':
+            self.model.window -= 1  # don't need 5 bigrams around our word - 4 will do
+            batches = bigram_batch_generator(self.model, self.sentences_generator(), batch_size=128)
+        else:
+            batches = batch_generator(self.model, self.sentences_generator(), batch_size=128)
         self.model.train(sentences=None, batches=batches)
         print('finished training!')
 
@@ -141,15 +165,29 @@ class GensimSandbox(object):
         self.embedding = self.model.syn0
 
     def train_tensor_decomp_embedding(self):
-        batches = batch_generator2(self.model, self.sentences_generator(), batch_size=1000)  # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
+        count_sents = self.num_sents
+        batches = batch_generator2(self.model, self.sentences_generator(num_sents=count_sents), batch_size=1000)  # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
         gatherer = PMIGatherer(self.model, n=3)
-        gatherer.populate_counts(batches)
+        if count_sents <= 1e6:
+            gatherer.populate_counts(batches, huge_vocab=False)
+        else:
+            gatherer.populate_counts(batches, huge_vocab=True)
 
-        def sparse_tensor_batches(batch_size=2000):
+        try:
+            with open('gatherer_5e6.pkl', 'wb') as f:
+                t = time.time()
+                import gc; gc.disable()
+                pickle.dump(gatherer, f)
+                gc.enable()
+                print('dumping took {} secs'.format(time.time() - t))
+        except Exception as e:
+            import pdb; pdb.set_trace()
+            print(e)
+        def sparse_tensor_batches(batch_size=1000):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=False)
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=True)
                 yield sparse_ppmi_tensor
 
         print('starting CP Decomp training')
@@ -159,7 +197,7 @@ class GensimSandbox(object):
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            decomp_method = CPDecomp(shape=(len(self.model.vocab),)*3, rank=self.embedding_dim, sess=self.sess, optimizer_type='2sgd')
+            decomp_method = CPDecomp(shape=(len(self.model.vocab),)*3, rank=self.embedding_dim, sess=self.sess, optimizer_type='2sgd', reg_param=0)
             print('starting training...')
             decomp_method.train(sparse_tensor_batches())
             self.embedding = decomp_method.U.eval()
@@ -186,7 +224,7 @@ class GensimSandbox(object):
         self.get_model_with_vocab()
         if self.method in ['cp_decomp']:
             self.train_tensor_decomp_embedding()
-        elif self.method in ['cbow', 'tt', 'subspace']:
+        elif self.method in ['bigram-cbow', 'cbow', 'tt', 'subspace']:
             self.train_gensim_embedding()
         self.evaluate_embedding()
 
@@ -194,6 +232,14 @@ def main():
     method = 'cp_decomp'
     num_sents = 5e5
     min_count = 10
+    for arg in sys.argv:
+        if arg.startswith('--method='):
+            method = arg.split('--method=')[1]
+        if arg.startswith('--num_sents='):
+            num_sents = float(arg.split('--num_sents=')[1])
+        if arg.startswith('--min_count='):
+            min_count = float(arg.split('--min_count=')[1])
+    print('Creating sandbox with method {}, num_sents {} and min_count {}.'.format(method, num_sents, min_count))
 
     sandbox = GensimSandbox(
         method=method,

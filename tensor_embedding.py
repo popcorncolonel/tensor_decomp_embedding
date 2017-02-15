@@ -2,6 +2,7 @@ from collections import defaultdict
 import itertools
 import numpy as np
 import os
+import random
 import tensorflow as tf
 from tensor_decomp import CPDecomp
 import time
@@ -180,6 +181,8 @@ class PMIGatherer(object):
         If n=3, PMI(x,y,z) = log(#(x,y,z) * |D|^2 / (#(x)#(y)#(z)))
                            = log(#(x,y,z)) + 2*log(|D|) - log(#(x)) - log(#(y)) - log(#(z))
         """
+        if self.n_counts[args] == 0:
+            return 0.0
         log_num = np.log2(self.n_counts[args]) + (self.n - 1)*np.log2(self.num_samples)
         log_denom = 0.0
         for arg in args:
@@ -187,7 +190,7 @@ class PMIGatherer(object):
         pmi = log_num - log_denom
         return pmi
 
-    def populate_counts(self, batches):
+    def populate_counts(self, batches, huge_vocab=True):
         '''
         `batches` is a generator of (context, word) tuples,
             where `context` is like [98345, 2348975, 38239, 138492, 3829, 329] (indices into the vocab) 
@@ -201,17 +204,33 @@ class PMIGatherer(object):
 
         print('getting counts...')
         t = time.time()
-        batch_counts, n_samples_per_batch = zip(*Parallel(n_jobs=50)(delayed(update_counts)(self, b) for b in batches))
-        print('joining count dicts...')
-        for d in batch_counts:
-            for k in d.keys():
-                if isinstance(k, tuple):
-                    self.n_counts[k] += d[k]
-                else:
-                    self.uni_counts[k] += d[k]
-        self.num_samples = sum(n_samples_per_batch)
+        if huge_vocab:  # memory is more important than time
+            for i, batch in enumerate(batches):
+                for ix in self.get_indices(batch, update_uni_counts=True):
+                    self.n_counts[ix] += 1
+                if len(self.n_counts) > 3e7:
+                    print(len(self.n_counts))
+                    print('killing half of the count-1 n_counts...')
+                    keys = [x for x in self.n_counts]
+                    for ix in keys:
+                        if self.n_counts[ix] == 1:
+                            if random.random() > .5:
+                                del self.n_counts[ix]
+                    print(len(self.n_counts))
+                self.num_samples += 1
+        else:  # time is more impt than memory
+            print('Populating count dicts (in parallel)...')
+            batch_counts, n_samples_per_batch = zip(*Parallel(n_jobs=50)(delayed(update_counts)(self, b) for b in batches))
+            print('joining count dicts...')
+            for d in batch_counts:
+                for k in d.keys():
+                    if isinstance(k, tuple):
+                        self.n_counts[k] += d[k]
+                    else:
+                        self.uni_counts[k] += d[k]
+            self.num_samples = sum(n_samples_per_batch)
         print('Gathering counts took {} secs'.format(time.time() - t))
-        pass
+
 
     def get_indices(self, batch, update_uni_counts=False):
         '''
@@ -262,7 +281,7 @@ class PMIGatherer(object):
             values = np.squeeze(values[positive_args])
             print('{} nonzero pmi\'s out of {} total'.format(len(values), num_total_vals))
         if debug and self.debug:
-            # self.debug so we can turn it off (in pdb) whever we want
+            # self.debug so we can turn it off (in pdb) whenever we want
             t = time.time()
             import heapq
             print('Getting top 200 PMIs...')
