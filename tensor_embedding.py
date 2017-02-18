@@ -181,7 +181,8 @@ class PMIGatherer(object):
         If n=3, PMI(x,y,z) = log(#(x,y,z) * |D|^2 / (#(x)#(y)#(z)))
                            = log(#(x,y,z)) + 2*log(|D|) - log(#(x)) - log(#(y)) - log(#(z))
         """
-        if self.n_counts[args] == 0:
+        if args not in self.valid_indices:
+            # check in the set so we don't have to store a new tuple for each thing not in the defaultdict
             return 0.0
         log_num = np.log2(self.n_counts[args]) + (self.n - 1)*np.log2(self.num_samples)
         log_denom = 0.0
@@ -190,7 +191,20 @@ class PMIGatherer(object):
         pmi = log_num - log_denom
         return pmi
 
-    def populate_counts(self, batches, huge_vocab=True):
+    def kill_ncounts(self, p=0.5, m=1):
+        '''
+        kills `p` percent of the things with count <= m
+        '''
+        print(len(self.n_counts))
+        print('killing {} of the count-{} n_counts...'.format(p, m))
+        keys = [x for x in self.n_counts]
+        for ix in keys:
+            if self.n_counts[ix] <= m:
+                if random.random() < p:
+                    del self.n_counts[ix]
+        print(len(self.n_counts))
+
+    def populate_counts(self, batches, huge_vocab=True, min_count=1):
         '''
         `batches` is a generator of (context, word) tuples,
             where `context` is like [98345, 2348975, 38239, 138492, 3829, 329] (indices into the vocab) 
@@ -208,16 +222,8 @@ class PMIGatherer(object):
             for i, batch in enumerate(batches):
                 for ix in self.get_indices(batch, update_uni_counts=True):
                     self.n_counts[ix] += 1
-                if len(self.n_counts) > 3e7:
-                    print(len(self.n_counts))
-                    print('killing half of the count-1 n_counts...')
-                    keys = [x for x in self.n_counts]
-                    for ix in keys:
-                        if self.n_counts[ix] == 1:
-                            if random.random() > .5:
-                                del self.n_counts[ix]
-                    print(len(self.n_counts))
-                self.num_samples += 1
+                if len(self.n_counts) > 1e8:
+                    self.kill_ncounts(0.5, 1)
         else:  # time is more impt than memory
             print('Populating count dicts (in parallel)...')
             batch_counts, n_samples_per_batch = zip(*Parallel(n_jobs=50)(delayed(update_counts)(self, b) for b in batches))
@@ -229,17 +235,23 @@ class PMIGatherer(object):
                     else:
                         self.uni_counts[k] += d[k]
             self.num_samples = sum(n_samples_per_batch)
+        print('Killing all n_counts with n < {}'.format(min_count))
+        self.kill_ncounts(p=1.0, m=min_count)  # kill everything with a count of `min_count` - it's gonna have low PPMI anyway (since everything has a huge mincount). 
+        self.valid_indices = {k for k in self.n_counts if self.n_counts[k] > 5}
         print('Gathering counts took {} secs'.format(time.time() - t))
 
 
-    def get_indices(self, batch, update_uni_counts=False):
+    def get_indices(self, batch, update_uni_counts=False, return_set=False):
         '''
         We are assuming each sent chunk in each batch we want to keep the co-occurrence count of.
         '''
         # set of indices, which are all ordered in ascending order, then we just permute everything at lookup time
         #       i.e. if indices = {(1,2,3)}, the indices gets expanded to [(1,2,3), (2,1,3), (3,2,1), ..., (1,3,2)] and the corresponding PMI vals get added
         #       This decreases computation time (and ram) for PMI. But (negligibly) increases computation time for sorting everything according to (1,2,3)
-        indices = []
+        if return_set: 
+            indices = set()
+        else:
+            indices = []
         for sent_chunk in batch:
             sent = sorted(list(set(sent_chunk)))
             if len(sent) < 3:
@@ -248,27 +260,27 @@ class PMIGatherer(object):
                 for j in range(i+1, len(sent)):
                     for k in range(j+1, len(sent)):
                         index = (sent[i], sent[j], sent[k]) 
-                        indices.append(index)
+                        if return_set:
+                            indices.add(index)
+                        else:
+                            indices.append(index)
                 if update_uni_counts:  # for efficiency -- only wanna loop through this once
                     self.uni_counts[sent[i]] += 1
             if update_uni_counts:  # since we don't loop through the last 2 elements
                 self.uni_counts[sent[-2]] += 1
                 self.uni_counts[sent[-1]] += 1
-        #for context, word in batch:
-            #product_producer = itertools.product(context, repeat=self.n-1)
-            #for product_tuple in product_producer:
+                self.num_samples += len(sent)
         return indices
 
     def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False):
-        print('Creating Sparse PMI tensor...')
+        print('Creating Sparse PMI tensor...', end='')
         t = time.time()
         if batch:
-            indices = self.get_indices(batch)
-            indices = list(set(indices))
+            indices = self.get_indices(batch, return_set=True)
+            indices = list(self.valid_indices.intersection(indices))
         else:
             indices = list(self.n_counts.keys())
 
-        print('filling values...')
         values = np.zeros(len(indices), dtype=np.float32) 
         for i in range(len(indices)):
             values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
@@ -279,7 +291,7 @@ class PMIGatherer(object):
             positive_args = np.argwhere(values > 0.0)
             indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])
             values = np.squeeze(values[positive_args])
-            print('{} nonzero pmi\'s out of {} total'.format(len(values), num_total_vals))
+            #print('{} nonzero pmi\'s out of {} total (=> {} total entries)'.format(len(values), num_total_vals, 6*len(values)))
         if debug and self.debug:
             # self.debug so we can turn it off (in pdb) whenever we want
             t = time.time()
@@ -303,8 +315,6 @@ class PMIGatherer(object):
                 indices_extended[6*i+j][perm[2]] = tup[2]
                 values_extended[6*i+j] = values[i]
                 j += 1
-        del indices
-        del values
         indices = indices_extended
         values = values_extended
         if numpy_dense_tensor:
@@ -313,8 +323,8 @@ class PMIGatherer(object):
             for val, ix in zip(values, indices):
                 ppmi_tensor[ix] += val
             return ppmi_tensor
-        print('total #values in tensor: {}'.format(len(indices)))
-        print('sparse tensor creation took {} secs'.format(time.time() - t))
+        print('total #values: {}...'.format(len(indices)), end='')
+        print('took {} secs'.format(int(time.time() - t)))
         sparse_tensor = tf.SparseTensorValue(indices, values, shape)
         return sparse_tensor
         

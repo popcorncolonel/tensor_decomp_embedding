@@ -327,6 +327,7 @@ class WordEmbedding(object):
             if self.step % 5000 == 1:
                 self.dev_step(x_batch, y_batch)
             #if self.step > 0 and self.step % 30000 == 0:
+            #    print('Saving checkpoint at step {}...'.format(self.step))
             #    path = self.saver.save(self.sess, checkpoint_prefix, global_step=self.step)
             #    print('Saved model checkpoint to {}'.format(path))
             self.train_step(x_batch, y_batch)

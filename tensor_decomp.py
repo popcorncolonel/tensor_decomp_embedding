@@ -1,4 +1,6 @@
+import datetime
 import numpy as np
+import os
 import tensorflow as tf
 import time
 
@@ -16,26 +18,27 @@ class CPDecomp(object):
         self.ndims = ndims
         self.sess = sess
 
-        # t-th batch tensor
-        # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
-        self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
-        # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
-        self.U = tf.Variable(tf.random_uniform(
-            shape=[self.shape[0], self.rank],
-            minval=-1.0,
-            maxval=1.0,
-        ), name="U")
-        self.V = tf.Variable(tf.random_uniform(
-            shape=[self.shape[1], self.rank],
-            minval=-1.0,
-            maxval=1.0,
-        ), name="V")
-        if self.ndims > 2:
-            self.W = tf.Variable(tf.random_uniform(
-                shape=[self.shape[2], self.rank],
+        with tf.device('/cpu:0'):
+            # t-th batch tensor
+            # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
+            self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
+            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
+            self.U = tf.Variable(tf.random_uniform(
+                shape=[self.shape[0], self.rank],
                 minval=-1.0,
                 maxval=1.0,
-            ), name="W")
+            ), name="U")
+            self.V = tf.Variable(tf.random_uniform(
+                shape=[self.shape[1], self.rank],
+                minval=-1.0,
+                maxval=1.0,
+            ), name="V")
+            if self.ndims > 2:
+                self.W = tf.Variable(tf.random_uniform(
+                    shape=[self.shape[2], self.rank],
+                    minval=-1.0,
+                    maxval=1.0,
+                ), name="W")
         self.create_loss_fn(reg_param=reg_param)
 
     def evaluate(self, X):
@@ -57,7 +60,7 @@ class CPDecomp(object):
             print("{}".format(rmse_val), file=self.results_file)
         print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
        
-    def train_step(self, approx_tensor, print_every=10):
+    def train_step(self, approx_tensor, print_every=5):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
             self.avg_time = 0.0
@@ -65,23 +68,32 @@ class CPDecomp(object):
         feed_dict = {
             self.X_t: approx_tensor,
         }
-        _, loss, step = self.sess.run(
+        _, loss, loss_summary, step = self.sess.run(
             [
                 self.train_ops, # might need multiple train ops to be executed sequentially (see the case of sals)
                 self.loss,
+                self.loss_summary,
                 self.global_step,
             ],
             feed_dict=feed_dict,
         )
+        if self.write_loss:
+            self.train_summary_writer.add_summary(loss_summary, step)
+        if self.checkpoint_every is not None:
+            if step % self.checkpoint_every == 0 and step > 0:
+                t = time.time()
+                print('Saving checkpoint at step {}...'.format(step))
+                path = self.saver.save(self.sess, self.checkpoint_prefix, global_step=self.global_step)
+                print('Saved model checkpoint to {} (it took {} secs)'.format(path, time.time() - t))
 
         if step % print_every == 0:
             batch_time = (time.time() - self.prev_time) / print_every
             print("Loss at step {}: {} (avg time per batch: {})".format(step, loss, batch_time))
             self.prev_time = time.time()
             self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
-            print("avg time: {}".format(self.avg_time))
+            #print("avg time (per batch, overall): {}".format(self.avg_time))
             self.total_recordings += 1
-            print("self.U: ", self.U.eval())
+            #print("self.U: ", self.U.eval())
         
     def create_loss_fn(self, reg_param):
         """
@@ -93,13 +105,14 @@ class CPDecomp(object):
             X is a sparse tensor. U,V,W are dense. 
             """
 
-            with tf.device('/cpu:0'):
+            indices = tf.cast(X.indices, tf.int32)
+            indices = tf.transpose(indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
+            with tf.device('/gpu:1'):
                 X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
-                indices = tf.transpose(X.indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
 
                 U_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
                 V_indices = tf.gather(indices, 1)
-                W_indices = tf.gather(indices, 2) # there better be an error!
+                W_indices = tf.gather(indices, 2)
                 U_vects = tf.gather(U, U_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
                 V_vects = tf.gather(V, V_indices)
                 W_vects = tf.gather(W, W_indices)
@@ -117,12 +130,13 @@ class CPDecomp(object):
 
         def reg(U,V,W):
             # NOTE: l2_loss already squares the norms. So we don't need to square them.
-            summed_norms = (
-                tf.nn.l2_loss(U, name="U_norm") +
-                tf.nn.l2_loss(V, name="V_norm") +
-                tf.nn.l2_loss(W, name="W_norm")
-            )
-            return (.5 * reg_param) * summed_norms
+            with tf.device('/gpu:1'):
+                summed_norms = (
+                    tf.nn.l2_loss(U, name="U_norm") +
+                    tf.nn.l2_loss(V, name="V_norm") +
+                    tf.nn.l2_loss(W, name="W_norm")
+                )
+                return (.5 * reg_param) * summed_norms
 
         if reg_param > 0.0:
             self.loss = L(self.X_t, self.U,self.V,self.W) + reg(self.U, self.V, self.W)
@@ -155,19 +169,22 @@ class CPDecomp(object):
         V = self.V
         W = self.W
         t = self.global_step
-        alpha = .3  # smaller => decays slower (more quickly get updates from the gradients)
-        eta_t = 1. / (1. + t**alpha)
+        alpha = .5  # smaller => decays slower (more quickly get updates from the gradients)
+        batch_size = 1. / 500. * tf.sqrt(tf.cast(X.shape[0], tf.float32))
+        eta_t = batch_size / (1. + t**alpha)
+
+        indices = tf.cast(X.indices, tf.int32)
+        indices = tf.transpose(indices)
+
+        i_s = tf.gather(indices, 0)
+        j_s = tf.gather(indices, 1)
+        k_s = tf.gather(indices, 2)
 
         def contract_X_U(X, V, W):
             '''
             X(.,V,W)_ir = sum_{j,k} X_ijk * V_jr * W_kr
             '''
             values = X.values
-            indices = tf.transpose(X.indices)
-
-            i_s = tf.gather(indices, 0)
-            j_s = tf.gather(indices, 1)
-            k_s = tf.gather(indices, 2)
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
             elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(V, j_s)), X.values))
@@ -186,11 +203,6 @@ class CPDecomp(object):
             X(U,.,W)_jr = sum_{i,k} X_ijk * U_ir * W_kr
             '''
             values = X.values
-            indices = tf.transpose(X.indices)
-
-            i_s = tf.gather(indices, 0)
-            j_s = tf.gather(indices, 1)
-            k_s = tf.gather(indices, 2)
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
             elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
@@ -209,11 +221,6 @@ class CPDecomp(object):
             X(U,V,.)_kr = sum_{i,j} X_ijk * U_ir * V_jr
             '''
             values = X.values
-            indices = tf.transpose(X.indices)
-
-            i_s = tf.gather(indices, 0)
-            j_s = tf.gather(indices, 1)
-            k_s = tf.gather(indices, 2)
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
             elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
@@ -245,7 +252,6 @@ class CPDecomp(object):
         self.gr3 = gamma_rho
         inv_gamma_rho = tf.matrix_inverse(gamma_rho)
         grad_value_W = tf.matmul(modified_X, inv_gamma_rho)
-        # could try a try:except? if except just ignore this batch? BUT MAKE SURE IT DOESNT HAPPEN TOO OFTEN. if except count > 100, wtf
 
         update_U_op = tf.assign(U, (1-eta_t) * U + eta_t * grad_value_U)
         update_V_op = tf.assign(V, (1-eta_t) * V + eta_t * grad_value_V)
@@ -269,7 +275,7 @@ class CPDecomp(object):
     def get_train_op_sgd(self):
         return self.optimizer.minimize(self.loss)
 
-    def train(self, expected_tensors, true_X=None, evaluate_every=100, results_file=None):
+    def train(self, expected_tensors, true_X=None, evaluate_every=100, results_file=None, write_loss=True, checkpoint_every=None):
         '''
         Assumes `expected_tensors` is a generator of sparse tensor values. 
         '''
@@ -286,41 +292,67 @@ class CPDecomp(object):
 
             self.train_ops = self.get_train_ops()
 
-            print('initializing variables...')
-            self.sess.run(tf.global_variables_initializer())
-            with self.sess.as_default():
-                print('looping through batches...')
-                for expected_tensor in expected_tensors:
-                    if self.batch_num % evaluate_every == 0 and true_X is not None:
-                        self.evaluate(true_X)
-                    try:
-                        self.train_step(expected_tensor)
-                    except tf.errors.InvalidArgumentError as e:
-                        self.batch_num -= 1
-                        num_invalid_arg_exceptions += 1
-                        print("INVALID ARG EXCEPTION: {}. Accidentally noninvertible matrix? There have been {} of these.".format(e, num_invalid_arg_exceptions))
-                        import pdb; pdb.set_trace()
-                    self.batch_num += 1
-                if hasattr(self, 'avg_time') and results_file is not None:
-                    print('avg batch time: {}'.format(self.avg_time), file=results_file)
+        self.write_loss = write_loss
+        if self.write_loss:
+            timestamp = str(datetime.datetime.now())
+            out_dir = os.path.abspath(os.path.join(os.path.curdir, 'tf_logs', timestamp))
+            print('Writing summaries to {}.'.format(out_dir))
+            self.loss_summary = tf.summary.scalar('loss', self.loss)
+            self.train_summary_writer = tf.summary.FileWriter(os.path.join(out_dir, 'summaries'), self.sess.graph)
+
+        self.checkpoint_every = checkpoint_every
+        if self.checkpoint_every is not None:
+            checkpoint_dir = os.path.abspath(os.path.join(out_dir, 'checkpoints'))
+            self.checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
+
+            if not os.path.exists(checkpoint_dir):
+                os.makedirs(checkpoint_dir)
+            self.saver = tf.train.Saver(tf.global_variables(), write_version=tf.train.SaverDef.V2)
+
+        print('initializing variables...')
+        self.sess.run(tf.global_variables_initializer())
+        with self.sess.as_default():
+            print('looping through batches...')
+            for expected_tensor in expected_tensors:
+                if self.batch_num % evaluate_every == 0 and true_X is not None:
+                    self.evaluate(true_X)
+                try:
+                    self.train_step(expected_tensor)
+                except tf.errors.InvalidArgumentError as e:
+                    self.batch_num -= 1
+                    num_invalid_arg_exceptions += 1
+                    print("INVALID ARG EXCEPTION: {}. Accidentally noninvertible matrix? There have been {} of these.".format(e, num_invalid_arg_exceptions))
+                    import pdb; pdb.set_trace()
+                self.batch_num += 1
+            if hasattr(self, 'avg_time') and results_file is not None:
+                print('avg batch time: {}'.format(self.avg_time), file=results_file)
+        self.train_summary_writer.close()
 
 
 def test_decomp():
-    shape = [30, 40, 50]
-    true_U = np.random.rand(30, 5)
-    true_V = np.random.rand(40, 5)
-    true_W = np.random.rand(50, 5)
+    shape = [500, 400, 500]
+    true_U = np.random.rand(shape[0], 5)
+    true_V = np.random.rand(shape[1], 5)
+    true_W = np.random.rand(shape[2], 5)
     true_X = np.einsum('ir,jr,kr->ijk', true_U, true_V, true_W)
-    # TODO: Why does it slow down over time??? Does it do that for Adam as well?
 
     def batch_tensors_gen(n):
         for _ in range(n):
-            yield true_X + (np.random.rand(30,40,50) - 0.5) 
+            yield true_X + (np.random.rand(*tuple(shape)) - 0.5) 
 
     def sparse_batch_tensor_generator(n=1500):
-        for X_t in batch_tensors_gen(n):
-            idx = tf.where(tf.not_equal(X_t, 0.0))
-            yield tf.SparseTensorValue(idx.eval(), tf.gather_nd(X_t, idx).eval(), X_t.shape)
+        import random
+        with tf.device('/cpu:0'):
+            for X_t in batch_tensors_gen(n):
+                for i in range(shape[0]):
+                    for j in range(shape[1]):
+                        for k in range(shape[2]):
+                            if random.random() < 0.996:
+                                X_t[i,j,k] = 0
+                idx = tf.where(tf.not_equal(X_t, 0.0))
+                indices = idx.eval().astype(np.uint16)
+                print('{} nonzero vals'.format(len(indices)))
+                yield tf.SparseTensorValue(indices, tf.gather_nd(X_t, idx).eval(), X_t.shape)
 
     config = tf.ConfigProto(
         allow_soft_placement=True,
@@ -333,44 +365,11 @@ def test_decomp():
             decomp_method = CPDecomp(
                 shape=shape,
                 sess=sess,
-                rank=10,
+                rank=300,
                 ndims=3,
                 optimizer_type='2sgd',
             )
-            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
-        print('training (on sals)!')
-        with open('results_sals.txt', 'w') as f:
-            # train sals
-            decomp_method = CPDecomp(
-                shape=shape,
-                sess=sess,
-                rank=10,
-                ndims=3,
-                optimizer_type='sals',
-            )
-            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
-        print('training (on adam)!')
-        with open('results_adam.txt', 'w') as f:
-            # train adam
-            decomp_method = CPDecomp(
-                shape=shape,
-                sess=sess,
-                rank=10,
-                ndims=3,
-                optimizer_type='adam',
-            )
-            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
-        print('training (on sgd)!')
-        with open('results_sgd.txt', 'w') as f:
-            # train sgd
-            decomp_method = CPDecomp(
-                shape=shape,
-                sess=sess,
-                rank=10,
-                ndims=3,
-                optimizer_type='sgd',
-            )
-            decomp_method.train(sparse_batch_tensor_generator(), true_X, evaluate_every=10, results_file=f)
+            decomp_method.train(sparse_batch_tensor_generator(), true_X=None, evaluate_every=2, results_file=f, write_loss=False)
 
 
 if __name__ == '__main__':

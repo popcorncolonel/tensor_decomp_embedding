@@ -1,4 +1,5 @@
 import _pickle as pickle  # python 3's cPickle
+import datetime
 import gensim
 import gensim.utils
 import os
@@ -64,6 +65,8 @@ class GensimSandbox(object):
         n_tokens = 0
         with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
             for line in f:
+                if count % int(num_sents / 10) == 0 and count > 0:
+                    print("Just hit sentence {} out of {} ({}%)".format(count, num_sents, 100*count / num_sents))
                 if count < num_sents:
                     count += 1
                     sent = line.rstrip().split()
@@ -165,32 +168,37 @@ class GensimSandbox(object):
         self.embedding = self.model.syn0
 
     def train_tensor_decomp_embedding(self):
+        gatherer = None
         count_sents = self.num_sents
         batches = batch_generator2(self.model, self.sentences_generator(num_sents=count_sents), batch_size=1000)  # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
-        gatherer = PMIGatherer(self.model, n=3)
-        if count_sents <= 1e6:
-            gatherer.populate_counts(batches, huge_vocab=False)
-        else:
-            gatherer.populate_counts(batches, huge_vocab=True)
+        if os.path.exists('gatherer_{}.pkl'.format(count_sents)):
+            with open('gatherer_{}.pkl'.format(count_sents), 'rb') as f:
+                t = time.time()
+                import gc; gc.disable()
+                gatherer = pickle.load(f)
+                gc.enable()
+                print('Loading gatherer took {} secs'.format(time.time() - t))
+        if not gatherer:
+            gatherer = PMIGatherer(self.model, n=3)
+            if count_sents <= 1e6:
+                gatherer.populate_counts(batches, huge_vocab=False)
+            else:
+                gatherer.populate_counts(batches, huge_vocab=True, min_count=5)
 
-        try:
-            with open('gatherer_5e6.pkl', 'wb') as f:
+            with open('gatherer_{}.pkl'.format(count_sents), 'wb') as f:
                 t = time.time()
                 import gc; gc.disable()
                 pickle.dump(gatherer, f)
                 gc.enable()
-                print('dumping took {} secs'.format(time.time() - t))
-        except Exception as e:
-            import pdb; pdb.set_trace()
-            print(e)
-        def sparse_tensor_batches(batch_size=1000):
+                print('Dumping gatherer took {} secs'.format(time.time() - t))
+
+        #gatherer.valid_indices = {k for k in gatherer.n_counts if gatherer.n_counts[k] > 5}
+        def sparse_tensor_batches(batch_size=20000, debug=False):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=True)
+                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
                 yield sparse_ppmi_tensor
-
-        print('starting CP Decomp training')
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
@@ -198,11 +206,41 @@ class GensimSandbox(object):
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
             decomp_method = CPDecomp(shape=(len(self.model.vocab),)*3, rank=self.embedding_dim, sess=self.sess, optimizer_type='2sgd', reg_param=0)
-            print('starting training...')
-            decomp_method.train(sparse_tensor_batches())
-            self.embedding = decomp_method.U.eval()
+        print('Starting CP Decomp training')
+        decomp_method.train(sparse_tensor_batches(), checkpoint_every=100)
+        self.embedding = decomp_method.U.eval()
 
         self.evaluate_embedding()
+
+        print('creating saver...')
+        saver = tf.train.Saver()
+        '''
+        saver = tf.train.Saver({
+            'selfU': decomp_method.U,
+            'selfV': decomp_method.V,
+            'selfW': decomp_method.W,
+        })
+        '''
+
+        timestamp = str(datetime.datetime.now())
+        LOG_DIR = 'tf_logs'
+        LOG_DIR = os.path.join(LOG_DIR, timestamp)
+        print('saving matrices to model.ckpt...')
+        saver.save(self.sess, os.path.join(LOG_DIR, "model.ckpt"), decomp_method.global_step)
+        f = open(LOG_DIR + '/metadata.tsv', 'w')
+        for i in range(len(self.model.vocab)): f.write(self.model.index2word[i] + '\n')
+        f.close()
+        from tensorflow.contrib.tensorboard.plugins import projector
+        print('Adding projector config...')
+        summary_writer = tf.summary.FileWriter(LOG_DIR)
+
+        config = projector.ProjectorConfig()
+        embedding = config.embeddings.add()
+        embedding.tensor_name = 'U'
+        embedding.metadata_path = os.path.join(LOG_DIR, 'metadata.tsv')
+
+        projector.visualize_embeddings(summary_writer, config)
+        # REMEMBER TO CLOSE tensor_decomp/train_summary_writer
         import pdb; pdb.set_trace()
         pass
         
