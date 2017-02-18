@@ -21,7 +21,11 @@ class CPDecomp(object):
         with tf.device('/cpu:0'):
             # t-th batch tensor
             # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
-            self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
+            #self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
+            self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')
+            self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
+            shape_sparse = np.array(self.shape, dtype=np.int64)
+            self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
             self.U = tf.Variable(tf.random_uniform(
                 shape=[self.shape[0], self.rank],
@@ -60,13 +64,14 @@ class CPDecomp(object):
             print("{}".format(rmse_val), file=self.results_file)
         print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
        
-    def train_step(self, approx_tensor, print_every=5):
+    def train_step(self, approx_indices, approx_values, print_every=5):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
             self.avg_time = 0.0
             self.total_recordings = 0
         feed_dict = {
-            self.X_t: approx_tensor,
+            self.indices: approx_indices,
+            self.values: approx_values,
         }
         _, loss, loss_summary, step = self.sess.run(
             [
@@ -299,6 +304,8 @@ class CPDecomp(object):
             print('Writing summaries to {}.'.format(out_dir))
             self.loss_summary = tf.summary.scalar('loss', self.loss)
             self.train_summary_writer = tf.summary.FileWriter(os.path.join(out_dir, 'summaries'), self.sess.graph)
+        else:
+            self.loss_summary = self.global_step  # so it doesnt crash when i try to evaluate loss_summary
 
         self.checkpoint_every = checkpoint_every
         if self.checkpoint_every is not None:
@@ -313,11 +320,11 @@ class CPDecomp(object):
         self.sess.run(tf.global_variables_initializer())
         with self.sess.as_default():
             print('looping through batches...')
-            for expected_tensor in expected_tensors:
+            for expected_indices, expected_values in expected_tensors:
                 if self.batch_num % evaluate_every == 0 and true_X is not None:
                     self.evaluate(true_X)
                 try:
-                    self.train_step(expected_tensor)
+                    self.train_step(expected_indices, expected_values)
                 except tf.errors.InvalidArgumentError as e:
                     self.batch_num -= 1
                     num_invalid_arg_exceptions += 1
@@ -330,7 +337,7 @@ class CPDecomp(object):
 
 
 def test_decomp():
-    shape = [500, 400, 500]
+    shape = [30, 40, 50]
     true_U = np.random.rand(shape[0], 5)
     true_V = np.random.rand(shape[1], 5)
     true_W = np.random.rand(shape[2], 5)
@@ -347,29 +354,30 @@ def test_decomp():
                 for i in range(shape[0]):
                     for j in range(shape[1]):
                         for k in range(shape[2]):
-                            if random.random() < 0.996:
+                            if random.random() < 0.99:
                                 X_t[i,j,k] = 0
                 idx = tf.where(tf.not_equal(X_t, 0.0))
                 indices = idx.eval().astype(np.uint16)
-                print('{} nonzero vals'.format(len(indices)))
-                yield tf.SparseTensorValue(indices, tf.gather_nd(X_t, idx).eval(), X_t.shape)
+                values = tf.gather_nd(X_t, idx).eval()
+                #print('{} nonzero vals'.format(len(indices)))
+                yield (indices, values)
+                #yield tf.SparseTensorValue(indices, values, X_t.shape)
 
     config = tf.ConfigProto(
         allow_soft_placement=True,
     )
     sess = tf.Session(config=config)
-    with sess.as_default():
-        print('training (on 2sgd)!')
-        with open('results_2sgd.txt', 'w') as f:
-            # train 2sgd
-            decomp_method = CPDecomp(
-                shape=shape,
-                sess=sess,
-                rank=300,
-                ndims=3,
-                optimizer_type='2sgd',
-            )
-            decomp_method.train(sparse_batch_tensor_generator(), true_X=None, evaluate_every=2, results_file=f, write_loss=False)
+    print('training (on 2sgd)!')
+    with open('results_2sgd.txt', 'w') as f:
+        # train 2sgd
+        decomp_method = CPDecomp(
+            shape=shape,
+            sess=sess,
+            rank=300,
+            ndims=3,
+            optimizer_type='2sgd',
+        )
+        decomp_method.train(sparse_batch_tensor_generator(), true_X=None, evaluate_every=2, results_file=f, write_loss=False)
 
 
 if __name__ == '__main__':

@@ -197,8 +197,8 @@ class GensimSandbox(object):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
-                yield sparse_ppmi_tensor
+                sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
+                yield sparse_ppmi_tensor_pair
 
         config = tf.ConfigProto(
             allow_soft_placement=True,

@@ -325,7 +325,8 @@ class PMIGatherer(object):
             return ppmi_tensor
         print('total #values: {}...'.format(len(indices)), end='')
         print('took {} secs'.format(int(time.time() - t)))
-        sparse_tensor = tf.SparseTensorValue(indices, values, shape)
-        return sparse_tensor
+        return (indices, values)
+        #sparse_tensor = tf.SparseTensorValue(indices, values, shape)
+        #return sparse_tensor
         
 
