@@ -192,10 +192,10 @@ class CPDecomp(object):
             values = X.values
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
-            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(V, j_s)), X.values))
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(V, j_s)), values))
             each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(W, k_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
             index_mappings = []
-            for i in range(self.shape[0]):
+            for i in range(self.shape[0]):  # TODO: maybe reconsider this. this is insanely unproductive and slow. 
                 idx_i = tf.where(tf.equal(i_s, i))  # this is potentially n^2 (if tf implements `where` naively)
                 contracted_vects_for_i = tf.gather(each_contracted_vector, idx_i)  # of shape (#nonzeroes, 1, R)
                 index_mappings.append(tf.reduce_sum(contracted_vects_for_i, axis=[0,1]))  # remove the #nonzeroes and the 1
@@ -210,7 +210,7 @@ class CPDecomp(object):
             values = X.values
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
-            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), values))
             each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(W, k_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
             index_mappings = []
             for j in range(self.shape[1]):
@@ -228,7 +228,7 @@ class CPDecomp(object):
             values = X.values
 
             # Can't broadcast a vector (1xN) and a NxM matrix - need a MxN to broadcast the 1xN against
-            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), X.values))
+            elemwise_mult = tf.transpose(tf.multiply(tf.transpose(tf.gather(U, i_s)), values))
             each_contracted_vector = tf.multiply(elemwise_mult, tf.gather(V, j_s))  # multiply a 1xN, RxN, and RxN matrices (elementwise) to get an RxN dimensional matrix
             index_mappings = []
             for k in range(self.shape[2]):
@@ -320,6 +320,7 @@ class CPDecomp(object):
         self.sess.run(tf.global_variables_initializer())
         with self.sess.as_default():
             print('looping through batches...')
+            self.sess.graph.finalize()
             for expected_indices, expected_values in expected_tensors:
                 if self.batch_num % evaluate_every == 0 and true_X is not None:
                     self.evaluate(true_X)
