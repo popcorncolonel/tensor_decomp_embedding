@@ -77,8 +77,48 @@ class WordEmbedding(object):
         #self.h = tf.reduce_mean(embedded_chars, 1) + self.embedding_b
         self.h = tf.reduce_mean(embedded_chars, 1)
 
-    def embed_with_bigramcbow(self, embedded_chars):
-        return self.embed_with_cbow(embedded_chars)
+    def embed_with_cnn(self, embedded_chars):
+        with tf.name_scope('embedding'):
+            # embedded_chars_expanded is of shape [None (minibatch size), context_size, embedding_size, 1 (#channel maps)]
+            self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
+        filter_sizes = [3,4,5]  # TODO: 1?
+        num_filters = 50
+
+        pooled_outputs = []
+        num_features_total = 0
+        for filter_size in filter_sizes:
+            with tf.name_scope('conv-maxpool-{}'.format(filter_size)):
+                filter_shape = [filter_size, self.embedding_size, 1, num_filters]
+                W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                b = tf.Variable(tf.constant(0.1, shape=[num_filters]), name='b')
+                conv = tf.nn.conv2d(
+                    input=self.embedded_chars_expanded,
+                    filter=W,
+                    strides=[1,1,1,1],
+                    padding='VALID',
+                    use_cudnn_on_gpu=True,
+                    name='conv',
+                )
+                h = tf.nn.relu(tf.nn.bias_add(conv, b), name='relu')
+                stride = int(self.context_size / 3) # int((context_size - filter_size + 1) / 3)
+                pooled = tf.nn.max_pool(
+                    h,
+                    ksize = [1, stride, 1, 1],
+                    strides=[1, stride, 1, 1],
+                    padding='VALID',
+                    name='pooling',
+                )
+                num_features_total += num_filters*int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride))) # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
+                pooled_outputs.append(pooled)
+        # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
+        # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
+        h_pool = tf.concat(1, pooled_outputs)
+        # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
+        assert num_features_total == h_pool._shape[1] * h_pool._shape[3] == self.embedding_size
+        self.h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
+        with tf.name_scope('dropout'):
+            self.h_drop = tf.nn.dropout(self.h_pool_flat, 0.5)
+        self.h = self.h_drop
 
     def embed_with_subspace_proj(self, embedded_chars):
         '''
@@ -131,25 +171,11 @@ class WordEmbedding(object):
 
     def create_embedding_layer(self):
         with tf.name_scope('embedding'):
-            if self.method == 'bigram-cbow':
-                assert self.vocab_model.bigram_count > 0, "Bigram vocabulary not build properly."
-                # #bigrams x d embedding matrix
-                with tf.device('/gpu:0'):
-                    C = tf.Variable(
-                        tf.truncated_normal(
-                            shape=[self.vocab_model.bigram_count, self.embedding_size],
-                            stddev=0.01,
-                            dtype=tf.float32,
-                        ),
-                        name='embedding_matrix',
-                        dtype=tf.float32,
-                    )
-            else:
-                # |V| x d embedding matrix
-                C = tf.Variable(
-                    tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
-                    name='embedding_matrix'
-                )
+            # |V| x d embedding matrix
+            C = tf.Variable(
+                tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
+                name='embedding_matrix'
+            )
             self.context_embedding = C
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(C, self.input_x)
@@ -160,9 +186,9 @@ class WordEmbedding(object):
             elif self.method == 'tensor':  # Tensor Train
                 print("Embedding the context via Tensor Train.")
                 self.embed_with_tensor_train(r=15)
-            elif self.method == 'bigram-cbow':  # bigram-cbow
-                print("Embedding the context with bigram averaging (bigram-cbow).")
-                self.embed_with_bigramcbow(self.embedded_chars)
+            elif self.method == 'cnn':  # CNN
+                print("Embedding the context with CNN")
+                self.embed_with_cnn(self.embedded_chars)
             else:  # CBOW
                 print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
@@ -230,7 +256,7 @@ class WordEmbedding(object):
         return embedding
 
     def set_vocab_model_embedding_matrix(self):
-        if self.method in ('subspace', 'tensor', 'cbow', 'bigram-cbow'):
+        if self.method in ('subspace', 'tensor', 'cbow', 'cnn'):
             embedding = self.get_embedding_matrix2()
         else:
             embedding = self.get_embedding_matrix1()
@@ -275,14 +301,7 @@ class WordEmbedding(object):
 
     def evaluate(self, rel_path='vectors.txt'):
         self.write_embedding_to_file(fname=rel_path)
-        method = None
-        if self.method == 'tensor':
-            method = 'tt'
-        elif self.method == 'subspace':
-            method = 'subspace'
-        else:
-            method = 'CBOW'
-        out_fname = 'results_iter{}_{}.txt'.format(self.step, method)
+        out_fname = 'results_iter{}_{}.txt'.format(self.step, self.method)
         os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
         print('done evaluating.')
 

@@ -144,6 +144,7 @@ class PpmiSvdEmbedding(TensorEmbedding):
         self.optimizer_type = 'svd'
 
     def learn_embedding(self, ppmi_tensor):
+        print('getting svd of ppmi_tensor (shape: {})'.format(ppmi_tensor.shape))
         U,S,V = np.linalg.svd(ppmi_tensor)
 
         U_d = U[:,:self.embedding_dim]
@@ -248,15 +249,34 @@ class PMIGatherer(object):
         # set of indices, which are all ordered in ascending order, then we just permute everything at lookup time
         #       i.e. if indices = {(1,2,3)}, the indices gets expanded to [(1,2,3), (2,1,3), (3,2,1), ..., (1,3,2)] and the corresponding PMI vals get added
         #       This decreases computation time (and ram) for PMI. But (negligibly) increases computation time for sorting everything according to (1,2,3)
+        def get_sorted_sent_indices(sorted_sent, i, n):
+            indices = set()
+            if n == 2:
+                for j in range(i+1, len(sorted_sent)):
+                    indices.add((sorted_sent[i], sorted_sent[j]))
+            else:
+                for j in range(i+1, len(sorted_sent)):
+                    for partial_index in get_sorted_sent_indices(sorted_sent, j, n-1):
+                        indices.add(sorted_sent[i] + partial_index)
+            if return_set:
+                return indices
+            else:
+                return list(indices)
+                
         if return_set: 
             indices = set()
         else:
             indices = []
         for sent_chunk in batch:
             sent = sorted(list(set(sent_chunk)))
-            if len(sent) < 3:
+            if len(sent) < self.n:
                 continue
-            for i in range(len(sent)-2):
+            for i in range(len(sent) - self.n + 1):
+                if return_set:
+                    indices = indices | get_sorted_sent_indices(sent, i, self.n)
+                else:
+                    indices.extend(get_sorted_sent_indices(sent, i, self.n))
+                '''
                 for j in range(i+1, len(sent)):
                     for k in range(j+1, len(sent)):
                         index = (sent[i], sent[j], sent[k]) 
@@ -264,12 +284,14 @@ class PMIGatherer(object):
                             indices.add(index)
                         else:
                             indices.append(index)
+                '''
                 if update_uni_counts:  # for efficiency -- only wanna loop through this once
                     self.uni_counts[sent[i]] += 1
-            if update_uni_counts:  # since we don't loop through the last 2 elements
-                self.uni_counts[sent[-2]] += 1
-                self.uni_counts[sent[-1]] += 1
+            if update_uni_counts:  # since we don't loop through the last n-1 elements
+                for i in range(-1, -self.n, -1):
+                    self.uni_counts[sent[i]] += 1
                 self.num_samples += len(sent)
+            pass
         return indices
 
     def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False):
@@ -299,21 +321,21 @@ class PMIGatherer(object):
             print('Getting top 200 PMIs...')
             top_k = heapq.nlargest(200, zip(values,indices), key=lambda x: x[0])
             top_k_pairs = sorted(list(set([(tuple(ix), val) for (val,ix) in top_k])), key=lambda x: x[1])
-            top_k_pairs_words = [((self.model.index2word[x[0]], self.model.index2word[x[1]], self.model.index2word[x[2]]), val) for (x, val) in top_k_pairs]
+            top_k_pairs_words = [(tuple(self.model.index2word[x[i]] for i in range(self.n)), val) for (x, val) in top_k_pairs]
             print(top_k_pairs_words)
             print('n largest took {} sec'.format(time.time() - t))
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             pass
-        indices_extended = np.zeros((3*2*len(indices), 3), dtype=np.uint16)
-        values_extended = np.zeros((3*2*len(indices),), dtype=np.float32)
+        n_fact = int(scipy.misc.factorial(self.n))
+        indices_extended = np.zeros((n_fact*len(indices), self.n), dtype=np.uint16)
+        values_extended = np.zeros((n_fact*len(indices),), dtype=np.float32)
         for i in range(len(indices)):
             tup = indices[i]
             j = 0
-            for perm in itertools.permutations(range(3)):
-                indices_extended[6*i+j][perm[0]] = tup[0]
-                indices_extended[6*i+j][perm[1]] = tup[1]
-                indices_extended[6*i+j][perm[2]] = tup[2]
-                values_extended[6*i+j] = values[i]
+            for perm in itertools.permutations(range(self.n)):
+                for k, sigma in enumerate(perm):
+                    indices_extended[n_fact*i+j][perm[k]] = tup[k]
+                    values_extended[n_fact*i+j] = values[i]
                 j += 1
         indices = indices_extended
         values = values_extended
@@ -321,7 +343,7 @@ class PMIGatherer(object):
             ''' Probably not gonna wanna do this if you're bigger than 2 dimensions. '''
             ppmi_tensor = np.zeros(shape)
             for val, ix in zip(values, indices):
-                ppmi_tensor[ix] += val
+                ppmi_tensor[tuple(ix)] += val
             return ppmi_tensor
         print('total #values: {}...'.format(len(indices)), end='')
         print('took {} secs'.format(int(time.time() - t)))
