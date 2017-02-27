@@ -12,7 +12,7 @@ import time
 import tensorflow as tf
 
 from gensim_utils import batch_generator, batch_generator2
-from tensor_embedding import TensorEmbedding, PMIGatherer, PpmiSvdEmbedding
+from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp
 from nltk.corpus import stopwords
 
@@ -24,7 +24,6 @@ stopwords = stopwords.union(grammar_stopwords)
 
 class GensimSandbox(object):
     def __init__(self, method, num_sents=1e6, embedding_dim=300, min_count=100):
-        assert method in ('tt', 'subspace', 'cbow', 'cp_decomp', 'cnn', 'svd', 'hosvd')
         self.method = method
         self.embedding_dim = embedding_dim
         self.min_count = min_count
@@ -99,7 +98,7 @@ class GensimSandbox(object):
             model.cbow = 1
         elif self.method == 'cnn':
             model.cnn = 1
-        if self.buildvocab:
+        if self.buildvocab or not os.path.exists(fname):
             print('building vocab...')
             model.build_vocab(self.sentences_generator())
             with open(fname, 'wb') as f:
@@ -113,10 +112,19 @@ class GensimSandbox(object):
         return self.model
 
     def evaluate_embedding(self):
-        rel_path = 'vectors.txt'
-        self.write_embedding_to_file()
+        rel_path = 'vectors_{}.txt'.format(self.method)
+        self.write_embedding_to_file(rel_path)
         out_fname = 'results_{}.txt'.format(self.method)
         os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
+        self.model.syn0 = self.embedding
+        print("most similar to king - man + woman: {}".format(self.model.most_similar(
+            positive=['king', 'woman'], negative=['man'],
+            topn=5,
+        )))
+        print("most similar to king: {}".format(self.model.most_similar(
+            positive=['king'],
+            topn=5,
+        )))
         print('done evaluating.')
 
     def list_vars_in_checkpoint(self, dirname):
@@ -178,7 +186,7 @@ class GensimSandbox(object):
                 gatherer = pickle.load(f)
                 gc.enable()
                 print('Loading gatherer took {} secs'.format(time.time() - t))
-        if not gatherer:
+        else:
             gatherer = PMIGatherer(self.model, n=n)
             if count_sents <= 1e6:
                 gatherer.populate_counts(batches, huge_vocab=False)
@@ -195,14 +203,20 @@ class GensimSandbox(object):
 
     def train_tensor_decomp_embedding(self):
         gatherer = self.get_pmi_gatherer(3)
-        #gatherer.valid_indices = {k for k in gatherer.n_counts if gatherer.n_counts[k] > 5}
 
-        def sparse_tensor_batches(batch_size=20000, debug=False):
+        def sparse_tensor_batches(batch_size=50000, debug=False):
             ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
-            batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
+            batches = batch_generator2(self.model, self.sentences_generator(num_sents=5e6), batch_size=batch_size)
             for batch in batches:
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
                 yield sparse_ppmi_tensor_pair
+
+        '''
+        def sparse_tensor_batches(n_repetitions=5, debug=False):
+            (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=debug)
+            for i in range(n_repetitions):
+                yield (indices, values)
+        '''
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
@@ -213,19 +227,29 @@ class GensimSandbox(object):
         print('Starting CP Decomp training')
         decomp_method.train(sparse_tensor_batches(), checkpoint_every=100)
         del gatherer
-        self.embedding = decomp_method.U.eval()
+
+        U = decomp_method.U.eval(self.sess)
+        V = decomp_method.U.eval(self.sess)
+        W = decomp_method.U.eval(self.sess)
+
+        lambdaU = np.linalg.norm(U, axis=0)
+        lambdaV = np.linalg.norm(V, axis=0)
+        lambdaW = np.linalg.norm(W, axis=0)
+
+        embedding = U / lambdaU
+        C1 = V / lambdaV
+        C2 = W / lambdaW
+
+        lambda_ = lambdaU * lambdaV * lambdaW
+        D = np.diag(lambda_ ** (1/3))
+        self.embedding = np.dot(embedding, D)
+        self.C1 = np.dot(C1, D)
+        self.C2 = np.dot(C2, D)
 
         self.evaluate_embedding()
 
-        print('creating saver...')
+        print('creating saver for embedding viz...')
         saver = tf.train.Saver()
-        '''
-        saver = tf.train.Saver({
-            'selfU': decomp_method.U,
-            'selfV': decomp_method.V,
-            'selfW': decomp_method.W,
-        })
-        '''
 
         timestamp = str(datetime.datetime.now())
         LOG_DIR = 'tf_logs'
@@ -245,20 +269,105 @@ class GensimSandbox(object):
         embedding.metadata_path = os.path.join(LOG_DIR, 'metadata.tsv')
 
         projector.visualize_embeddings(summary_writer, config)
-        # REMEMBER TO CLOSE tensor_decomp/train_summary_writer
-        import pdb; pdb.set_trace()
-        pass
-        
-    def train_tensor_hosvd_embedding(self):
-        '''
-        self.embedding_dim = 100
-        d = scipy.io.loadmat('../matlab/VcubsqrtD_14419_100.mat')
-        self.embedding = d['x']
-        self.evaluate_embedding()
-        return
-        '''
+        try:
+            decomp_method.train_summary_writer.close()
+        except Exception as e:
+            print(e)
+            import pdb; pdb.set_trace()
+            pass
+
+    def train_save_sp_tensor(self):
         gatherer = self.get_pmi_gatherer(3)
-        indices, values = gatherer.create_pmi_tensor(positive=True, debug=False)
+        print('creating PPMI tensor...')
+        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
+        print('saving .mat file')
+        scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
+        print('saved .mat file')
+        sys.exit()
+        
+    def restore_from_ckpt(self):
+        config = tf.ConfigProto(allow_soft_placement=True)
+        with tf.Session(config=config) as sess:
+            U = tf.Variable(tf.random_uniform(
+                shape=[len(self.model.vocab), self.embedding_dim],
+                minval=-1.0,
+                maxval=1.0,
+            ), name="U")
+            V = tf.Variable(tf.random_uniform(
+                shape=[len(self.model.vocab), self.embedding_dim],
+                minval=-1.0,
+                maxval=1.0,
+            ), name="V")
+            W = tf.Variable(tf.random_uniform(
+                shape=[len(self.model.vocab), self.embedding_dim],
+                minval=-1.0,
+                maxval=1.0,
+            ), name="W")
+            saver = tf.train.Saver({'U': U, "V": V, "W": W})
+            dirname = '2017-02-24 20:28:06.919189'
+            saver.restore(sess, tf.train.latest_checkpoint('tf_logs/{}/checkpoints/'.format(dirname)))
+            U = U.eval()
+            V = V.eval()
+            W = W.eval()
+            # normalize columns, store in lambda.
+            lambdaU = np.linalg.norm(U, axis=0)
+            lambdaV = np.linalg.norm(V, axis=0)
+            lambdaW = np.linalg.norm(W, axis=0)
+
+            embedding = U / lambdaU
+            C1 = V / lambdaV
+            C2 = W / lambdaW
+
+            lambda_ = lambdaU * lambdaV * lambdaW
+            D = np.diag(lambda_ ** (1/3))
+            self.embedding = np.dot(embedding, D)
+            import pdb; pdb.set_trace()
+            self.C1 = np.dot(C1, D)
+            self.C2 = np.dot(C2, D)
+
+    def loadmatlab(self):
+        d = scipy.io.loadmat('sp_tensor.mat')
+        values = d['values'].T
+        indices = d['indices']
+
+        self.embedding_dim = 100
+        d = scipy.io.loadmat('../matlab/UVW_100_30e6words.mat')
+        U = d['U']
+        V = d['V']
+        W = d['W']
+        lambda_ = np.squeeze(d['lambda'])
+        embedding  = np.dot(U, np.diag(lambda_ ** (1. / 3.)))
+        C1 = np.dot(V, np.diag(lambda_ ** (1. / 3.)))
+        C2 = np.dot(W, np.diag(lambda_ ** (1. / 3.)))
+        def pred_xijk(i, j, k, U=U, V=V, W=W, lambda_=lambda_):
+            hadamard = embedding[i] * C1[j] * C2[k] 
+            return np.sum(hadamard)
+        def mse(embedding=embedding, C1=C1, C2=C2, U=U, V=V, W=W, lambda_=lambda_):
+            err = 0.0
+            cnt = 0.0
+            smallest_se = float('inf')  # se = squared error
+            for val, ix in zip(values, indices):
+                val = val[0]
+                if cnt > 5e6:
+                    return err / cnt
+                pred_val = pred_xijk(ix[0], ix[1], ix[2])
+                se = (val - pred_val)**2 
+                #print('|{} - {}|^2 = {}'.format(val, pred_val, se))
+                if se < smallest_se:
+                    smallest_se = se
+                err += se
+                cnt += 1
+            return err / cnt
+        self.embedding = W
+        self.evaluate_embedding()
+        print(mse())
+        import pdb; pdb.set_trace()
+        return
+
+    def train_tensor_hosvd_embedding(self):
+        gatherer = self.get_pmi_gatherer(3)
+        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True)
+        scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
         # make it from a nd sparse tensor to a |V|x|V|^{n-1} dimensional sparse matrix
         new_indices = np.zeros((len(indices), 2))
         new_values = np.zeros(len(values))
@@ -363,6 +472,14 @@ class GensimSandbox(object):
             self.train_gensim_embedding()
         elif self.method in ['svd']:
             self.train_svd_embedding()
+        elif self.method in ['matlab']:
+            self.train_save_sp_tensor()
+        elif self.method in ['loadmatlab']:
+            self.loadmatlab()
+        elif self.method in ['restore_ckpt']:
+            self.restore_from_ckpt()
+        else:
+            raise ValueError('undefined method {}'.format(self.method))
         self.evaluate_embedding()
 
 def main():

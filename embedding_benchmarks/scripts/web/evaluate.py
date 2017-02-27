@@ -395,7 +395,6 @@ def evaluate_on_all(w):
         similarity_results[name] = evaluate_similarity(w, data.X, data.y)
         logger.info("Spearman correlation of scores on {} {}".format(name, similarity_results[name]))
 
-    '''
     # Calculate results on analogy
     logger.info("Calculating analogy benchmarks")
     analogy_tasks = {
@@ -411,9 +410,7 @@ def evaluate_on_all(w):
 
     analogy_results["SemEval2012_2"] = evaluate_on_semeval_2012_2(w)['all']
     logger.info("Analogy prediction accuracy on {} {}".format("SemEval2012", analogy_results["SemEval2012_2"]))
-    '''
-
-    '''
+    
     # Calculate results on categorization
     logger.info("Calculating categorization benchmarks")
     categorization_tasks = {
@@ -431,13 +428,12 @@ def evaluate_on_all(w):
     for name, data in iteritems(categorization_tasks):
         categorization_results[name] = evaluate_categorization(w, data.X, data.y)
         logger.info("Cluster purity on {} {}".format(name, categorization_results[name]))
-    '''
 
     # Construct pd table
-    #cat = pd.DataFrame([categorization_results])
-    #analogy = pd.DataFrame([analogy_results])
+    cat = pd.DataFrame([categorization_results])
+    analogy = pd.DataFrame([analogy_results])
     sim = pd.DataFrame([similarity_results])
     results = sim
-    #results = cat.join(sim).join(analogy)
+    results = cat.join(sim).join(analogy)
 
     return results

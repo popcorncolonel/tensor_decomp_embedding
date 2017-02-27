@@ -9,7 +9,10 @@ import time
 import scipy
 
 from joblib import Parallel, delayed
+
+
 def update_counts(self, batch):
+    ''' for parallel processing, of speed is an issue '''
     batch_counts = defaultdict(int)
     self.uni_counts = batch_counts
     # create own count here, return it, union them together
@@ -257,7 +260,7 @@ class PMIGatherer(object):
             else:
                 for j in range(i+1, len(sorted_sent)):
                     for partial_index in get_sorted_sent_indices(sorted_sent, j, n-1):
-                        indices.add(sorted_sent[i] + partial_index)
+                        indices.add((sorted_sent[i], partial_index[0], partial_index[1]))
             if return_set:
                 return indices
             else:
@@ -272,19 +275,19 @@ class PMIGatherer(object):
             if len(sent) < self.n:
                 continue
             for i in range(len(sent) - self.n + 1):
-                if return_set:
-                    indices = indices | get_sorted_sent_indices(sent, i, self.n)
+                if self.n == 2:
+                    if return_set:
+                        indices = indices | get_sorted_sent_indices(sent, i, self.n)
+                    else:
+                        indices.extend(get_sorted_sent_indices(sent, i, self.n))
                 else:
-                    indices.extend(get_sorted_sent_indices(sent, i, self.n))
-                '''
-                for j in range(i+1, len(sent)):
-                    for k in range(j+1, len(sent)):
-                        index = (sent[i], sent[j], sent[k]) 
-                        if return_set:
-                            indices.add(index)
-                        else:
-                            indices.append(index)
-                '''
+                    for j in range(i+1, len(sent)):
+                        for k in range(j+1, len(sent)):
+                            index = (sent[i], sent[j], sent[k]) 
+                            if return_set:
+                                indices.add(index)
+                            else:
+                                indices.append(index)
                 if update_uni_counts:  # for efficiency -- only wanna loop through this once
                     self.uni_counts[sent[i]] += 1
             if update_uni_counts:  # since we don't loop through the last n-1 elements
@@ -294,8 +297,8 @@ class PMIGatherer(object):
             pass
         return indices
 
-    def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False):
-        print('Creating Sparse PMI tensor...', end='')
+    def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False, limit_large_vals=False):
+        print('Creating Sparse PMI tensor...')
         t = time.time()
         if batch:
             indices = self.get_indices(batch, return_set=True)
@@ -308,6 +311,17 @@ class PMIGatherer(object):
             values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
         shape = (self.vocab_len,) * self.n
         indices = np.asarray(indices, dtype=np.uint16)
+        if limit_large_vals:
+            new_indices = []
+            new_values = []
+            for val, ix in zip(values, indices):
+                # exclude things like (0, 1, 2385) but include things like (2543, 13782, 3278) and (0, 43589, 3482)
+                if len(np.where(ix < 15)[0]) <= 1:
+                    new_indices.append(ix)
+                    new_values.append(val)
+            indices = np.array(new_indices)
+            values = np.array(new_values)
+
         num_total_vals = len(values)
         if positive:
             positive_args = np.argwhere(values > 0.0)
@@ -348,7 +362,5 @@ class PMIGatherer(object):
         print('total #values: {}...'.format(len(indices)), end='')
         print('took {} secs'.format(int(time.time() - t)))
         return (indices, values)
-        #sparse_tensor = tf.SparseTensorValue(indices, values, shape)
-        #return sparse_tensor
         
 

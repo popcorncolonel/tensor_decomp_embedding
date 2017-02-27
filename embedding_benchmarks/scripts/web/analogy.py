@@ -83,28 +83,33 @@ class SimpleAnalogySolver(sklearn.base.BaseEstimator):
         w = self.w.most_frequent(self.k) if self.k else self.w
         words = self.w.vocabulary.words
         word_id = self.w.vocabulary.word_id
-        mean_vector = np.mean(w.vectors, axis=0)
+        #mean_vector = np.mean(w.vectors, axis=0)
         output = []
 
         missing_words = 0
+        n_words = 0
         for query in X:
             for query_word in query:
+                n_words += 1
                 if query_word not in word_id:
                     missing_words += 1
         if missing_words > 0:
-            logger.warning("Missing {} words. Will replace them with mean vector".format(missing_words))
+            logger.warning("Missing {}% of words ({} / {} missing).".format(missing_words / n_words, missing_words, n_words))
 
         # Batch due to memory constaints (in dot operation)
         for id_batch, batch in enumerate(batched(range(len(X)), self.batch_size)):
             ids = list(batch)
             X_b = X[ids]
+            X_b = np.array([triple for triple in X_b if triple[0] in w and triple[1] in w and triple[2] in w])
             if id_batch % np.floor(len(X) / (10. * self.batch_size)) == 0:
                 logger.info("Processing {}/{} batch".format(int(np.ceil(ids[1] / float(self.batch_size))),
                                                             int(np.ceil(X.shape[0] / float(self.batch_size)))))
 
-            A, B, C = np.vstack(w.get(word, mean_vector) for word in X_b[:, 0]), \
-                      np.vstack(w.get(word, mean_vector) for word in X_b[:, 1]), \
-                      np.vstack(w.get(word, mean_vector) for word in X_b[:, 2])
+            if len(X_b) == 0:
+                continue
+            A = np.vstack(w.get(word) for word in X_b[:, 0])
+            B = np.vstack(w.get(word) for word in X_b[:, 1])
+            C = np.vstack(w.get(word) for word in X_b[:, 2])
 
             if self.method == "add":
                 D = np.dot(w.vectors, (B - A + C).T)
