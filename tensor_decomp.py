@@ -24,6 +24,12 @@ class CPDecomp(object):
             #self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
             self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')
             self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
+            self.I_slices = [tf.sparse_placeholder(tf.float32, shape=[self.shape[1], self.shape[2]])]
+            self.J_slices = [tf.sparse_placeholder(tf.float32, shape=[self.shape[0], self.shape[2]])]
+            self.K_slices = [tf.sparse_placeholder(tf.float32, shape=[self.shape[0], self.shape[1]])]
+            for index in self.indces:
+                pass
+            import pdb; pdb.set_trace()
             shape_sparse = np.array(self.shape, dtype=np.int64)
             self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
