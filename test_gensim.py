@@ -62,7 +62,7 @@ class GensimSandbox(object):
     def sentences_generator(self, num_sents=None):
         if num_sents is None:
             num_sents = self.num_sents
-        tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # also has stopwords and hawaiian removed
+        tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # already has stopwords and hawaiian removed
         count = 0
         n_tokens = 0
         with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
@@ -79,6 +79,7 @@ class GensimSandbox(object):
                     raise StopIteration
 
     def get_model_with_vocab(self, fname='wikimodel'):
+        fname += '_{}_{}'.format(self.num_sents, self.min_count)
         model = gensim.models.Word2Vec(
             iter=1,
             max_vocab_size=None,
@@ -205,7 +206,9 @@ class GensimSandbox(object):
         gatherer = self.get_pmi_gatherer(3)
 
         def sparse_tensor_batches(batch_size=50000, debug=False):
-            ''' because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) '''
+            '''
+            because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) 
+            '''
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=5e6), batch_size=batch_size)
             for batch in batches:
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
@@ -278,12 +281,34 @@ class GensimSandbox(object):
 
     def train_save_sp_tensor(self):
         gatherer = self.get_pmi_gatherer(3)
-        print('creating PPMI tensor...')
+        from pymatbridge import Matlab
+        session = Matlab()
+        session.start()
         indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
+
+        session.set_variable('indices', indices+1)
+        session.set_variable('vals', values)
+        session.set_variable('size_', np.array([len(self.model.vocab)] * 3))
+        session.set_variable('R', self.embedding_dim)
+        session.run_code("T = sptensor(indices, vals', size_);")
+        print('running ALS...')
+        t = time.time()
+        session.run_code('[P, U0, out] = cp_als(T, R)')
+        print('ALS took {} secs'.format(time.time() - t))
+        session.run_code('lambda = P.lambda;')
+        session.run_code('U = P{1,1};')
+        session.run_code('V = P{2,1};')
+        session.run_code('W = P{3,1};')
+        lambda_ = session.get_variable('lambda')
+        U = session.get_variable('U')
+        import pdb; pdb.set_trace()
+        print('creating PPMI tensor...')
+        '''
         print('saving .mat file')
         scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
         print('saved .mat file')
         sys.exit()
+        '''
         
     def restore_from_ckpt(self):
         config = tf.ConfigProto(allow_soft_placement=True)
