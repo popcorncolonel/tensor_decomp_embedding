@@ -1,8 +1,6 @@
 method = matlab
-min_count = 1420
-min_count = 5000
+min_count = 800
 num_sents = 5e6
-num_sents = 30e6
 
 all:
 	python3 -m pdb -c continue test_gensim.py

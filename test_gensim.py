@@ -117,6 +117,7 @@ class GensimSandbox(object):
         rel_path = 'vectors_{}.txt'.format(self.method)
         self.write_embedding_to_file(rel_path)
         out_fname = 'results_{}.txt'.format(self.method)
+        # WORD EMBEDDING BENCHMARKS - word similarity, categorization
         os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
         self.model.syn0 = self.embedding
         print("most similar to king - man + woman: {}".format(self.model.most_similar(
@@ -203,7 +204,7 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_tensor_decomp_embedding(self):
+    def train_online_cp_decomp_embedding(self):
         gatherer = self.get_pmi_gatherer(3)
 
         def sparse_tensor_batches(batch_size=50000, debug=False):
@@ -283,19 +284,27 @@ class GensimSandbox(object):
     def train_save_sp_tensor(self):
         gatherer = self.get_pmi_gatherer(3)
         print('creating PPMI tensor...')
-        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
+        #indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
+        #scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
 
         from pymatbridge import Matlab
         session = Matlab()
+        print('starting matlab session...')
         session.start()
-        session.set_variable('indices', indices+1)
-        session.set_variable('vals', values)
-        session.set_variable('size_', np.array([len(self.model.vocab)] * 3))
-        session.set_variable('R', self.embedding_dim)
-        session.run_code("T = sptensor(indices, vals', size_);")
+        #session.set_variable('indices', indices+1)
+        #session.set_variable('vals', values)
+
+        print('setting up variables...')
+        session.run_code("d = load('/home/eric/code/gensim/sp_tensor.mat');")
+        session.run_code("indices = d.indices + 1;")
+        session.run_code("vals = d.values';")
+        session.run_code('size_ = [{0} {0} {0}];'.format(len(self.model.vocab)))
+        session.run_code('R = {};'.format(self.embedding_dim))
+        import pdb; pdb.set_trace()
+        res = session.run_code("T = sptensor(indices, vals, size_);")
         print('running ALS...')
         t = time.time()
-        session.run_code('[P, U0, out] = cp_als(T, R)')
+        res = session.run_code('[P, U0, out] = cp_als(T, R)')
         print('ALS took {} secs'.format(time.time() - t))
         session.run_code('lambda = P.lambda;')
         session.run_code('U = P{1,1};')
@@ -417,11 +426,10 @@ class GensimSandbox(object):
             pickle.dump(self.model, f)
         shutil.copyfile('/home/eric/code/gensim/results/vectors_{}'.format(self.method), parent_dir + '/vectors_{}.txt'.format(self.method))
 
-
     def train(self):
         self.get_model_with_vocab()
         if self.method in ['cp_decomp']:
-            self.train_tensor_decomp_embedding()
+            self.train_online_cp_decomp_embedding()
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
             self.train_gensim_embedding()
         elif self.method in ['svd']:
@@ -435,6 +443,7 @@ class GensimSandbox(object):
         else:
             raise ValueError('undefined method {}'.format(self.method))
         self.evaluate_embedding()
+        self.save_metadata()
 
 def main():
     method = 'cp_decomp'
@@ -452,7 +461,7 @@ def main():
     sandbox = GensimSandbox(
         method=method,
         num_sents=num_sents,
-        embedding_dim=300,
+        embedding_dim=100,
         min_count=min_count,
     )
     sandbox.train()
