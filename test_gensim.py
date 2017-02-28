@@ -7,6 +7,7 @@ import os
 import pdb
 import scipy
 import scipy.io
+import shutil
 import sys
 import time
 import tensorflow as tf
@@ -281,11 +282,12 @@ class GensimSandbox(object):
 
     def train_save_sp_tensor(self):
         gatherer = self.get_pmi_gatherer(3)
+        print('creating PPMI tensor...')
+        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
+
         from pymatbridge import Matlab
         session = Matlab()
         session.start()
-        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, limit_large_vals=True)
-
         session.set_variable('indices', indices+1)
         session.set_variable('vals', values)
         session.set_variable('size_', np.array([len(self.model.vocab)] * 3))
@@ -302,7 +304,6 @@ class GensimSandbox(object):
         lambda_ = session.get_variable('lambda')
         U = session.get_variable('U')
         import pdb; pdb.set_trace()
-        print('creating PPMI tensor...')
         '''
         print('saving .mat file')
         scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
@@ -346,7 +347,6 @@ class GensimSandbox(object):
             lambda_ = lambdaU * lambdaV * lambdaW
             D = np.diag(lambda_ ** (1/3))
             self.embedding = np.dot(embedding, D)
-            import pdb; pdb.set_trace()
             self.C1 = np.dot(C1, D)
             self.C2 = np.dot(C2, D)
 
@@ -384,90 +384,7 @@ class GensimSandbox(object):
                 cnt += 1
             return err / cnt
         self.embedding = W
-        self.evaluate_embedding()
-        print(mse())
-        import pdb; pdb.set_trace()
-        return
 
-    def train_tensor_hosvd_embedding(self):
-        gatherer = self.get_pmi_gatherer(3)
-        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True)
-        scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
-        # make it from a nd sparse tensor to a |V|x|V|^{n-1} dimensional sparse matrix
-        new_indices = np.zeros((len(indices), 2))
-        new_values = np.zeros(len(values))
-        for i, (ix, val) in enumerate(zip(indices, values)):
-            # for mode 1 unfolding. (ijk)->(i, j+k*J)
-            new_indices[i][0] = ix[0]
-            new_indices[i][1] = ix[1] + ix[2] * len(self.model.vocab)
-            new_values[i] = val
-        sparse_mat = scipy.sparse.coo_matrix((new_values, (new_indices[:,0], new_indices[:,1])), shape=(len(self.model.vocab), len(self.model.vocab)**2))
-        sparse_mat_csc = scipy.sparse.csc_matrix(sparse_mat)
-        aat = sparse_mat_csc.dot(sparse_mat_csc.T)
-
-        import gc; gc.collect()
-        del gatherer
-        del indices
-        del values
-        del new_values
-        del new_indices
-        del sparse_mat
-        print('Calculating singular values...')
-        t = time.time()
-        k = 100
-        vals, vects = scipy.sparse.linalg.eigsh(aat, k=k)
-        self.embedding_dim = k
-        #print('Calculating sparse SVD...')
-        #import sparsesvd
-        #ut, s, vt = sparsesvd.sparsesvd(sparse_mat_csc, 10)
-        #from gensim.models.lsimodel import stochastic_svd
-        #stochastic_svd(sparse_mat, rank=100, num_terms=len(self.model.vocab))
-        '''
-        from sklearn.decomposition import TruncatedSVD
-        svd = TruncatedSVD(n_components=3, n_iter=5, random_state=42)
-        svd.fit(sparse_mat)
-        print(svd.explained_variance_ratio_.sum())
-        '''
-        #result = scipy.sparse.linalg.svds(sparse_mat, k=100)
-        #print(result)
-        print('that took {} secs'.format(time.time() - t))
-        import pdb; pdb.set_trace()
-        # TODO: HOSVD/get factor matrix/get top 300 left eigenpairs/singular pairs of M_(1)?
-
-        self.evaluate_embedding()
-
-        print('creating saver...')
-        saver = tf.train.Saver()
-        '''
-        saver = tf.train.Saver({
-            'selfU': decomp_method.U,
-            'selfV': decomp_method.V,
-            'selfW': decomp_method.W,
-        })
-        '''
-
-        timestamp = str(datetime.datetime.now())
-        LOG_DIR = 'tf_logs'
-        LOG_DIR = os.path.join(LOG_DIR, timestamp)
-        print('saving matrices to model.ckpt...')
-        saver.save(self.sess, os.path.join(LOG_DIR, "model.ckpt"), decomp_method.global_step)
-        f = open(LOG_DIR + '/metadata.tsv', 'w')
-        for i in range(len(self.model.vocab)): f.write(self.model.index2word[i] + '\n')
-        f.close()
-        from tensorflow.contrib.tensorboard.plugins import projector
-        print('Adding projector config...')
-        summary_writer = tf.summary.FileWriter(LOG_DIR)
-
-        config = projector.ProjectorConfig()
-        embedding = config.embeddings.add()
-        embedding.tensor_name = 'U'
-        embedding.metadata_path = os.path.join(LOG_DIR, 'metadata.tsv')
-
-        projector.visualize_embeddings(summary_writer, config)
-        # REMEMBER TO CLOSE tensor_decomp/train_summary_writer
-        import pdb; pdb.set_trace()
-        pass
-        
     def train_svd_embedding(self):
         gatherer = self.get_pmi_gatherer(2)
 
@@ -475,7 +392,6 @@ class GensimSandbox(object):
         dense_ppmi_tensor = gatherer.create_pmi_tensor(positive=True, numpy_dense_tensor=False, debug=True)
         del gatherer
 
-        import pdb; pdb.set_trace()
         embedding_model = PpmiSvdEmbedding(self.model, embedding_dim=self.embedding_dim)
         print("calculating SVD on {0}x{0}...".format(len(self.model.vocab)))
         t = time.time()
@@ -483,16 +399,29 @@ class GensimSandbox(object):
         total_svd_time = time.time() - t
         print("SVD on {}x{} took {}s".format(len(self.model.vocab), len(self.model.vocab), total_svd_time))
         self.embedding = embedding_model.get_embedding_matrix()
-        import pdb; pdb.set_trace()
-        print(self.embedding)
-        self.evaluate_embedding()
+
+    def save_metadata(self):
+        grandparent_dir = os.path.abspath('runs/{}'.format(self.method))
+        timestamp = str(datetime.datetime.now())
+        parent_dir = grandparent_dir + '/' + timestamp
+        if not os.path.exists(grandparent_dir):
+            os.mkdir(grandparent_dir)
+        if not os.path.exists(parent_dir):
+            os.mkdir(parent_dir)
+        with open(parent_dir + '/metadata.txt', 'w') as f:
+            f.write('Num sents: {}\n'.format(self.num_sents))
+            f.write('Min count: {}\n'.format(self.min_count))
+            f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
+        self.write_embedding_to_file(parent_dir + '/vectors.txt')
+        with open(parent_dir + '/vocabmodel', 'wb') as f:
+            pickle.dump(self.model, f)
+        shutil.copyfile('/home/eric/code/gensim/results/vectors_{}'.format(self.method), parent_dir + '/vectors_{}.txt'.format(self.method))
+
 
     def train(self):
         self.get_model_with_vocab()
         if self.method in ['cp_decomp']:
             self.train_tensor_decomp_embedding()
-        elif self.method in ['hosvd']:
-            self.train_tensor_hosvd_embedding()
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
             self.train_gensim_embedding()
         elif self.method in ['svd']:
