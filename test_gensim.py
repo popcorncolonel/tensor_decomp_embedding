@@ -1,5 +1,6 @@
-import _pickle as pickle  # python 3's cPickle
+#import _pickle as pickle  # python 3's cPickle
 import datetime
+import dill
 import gensim
 import gensim.utils
 import numpy as np
@@ -7,7 +8,6 @@ import os
 import pdb
 import scipy
 import scipy.io
-import shutil
 import sys
 import time
 import tensorflow as tf
@@ -26,9 +26,9 @@ stopwords = stopwords.union(grammar_stopwords)
 class GensimSandbox(object):
     def __init__(self, method, num_sents=1e6, embedding_dim=300, min_count=100):
         self.method = method
-        self.embedding_dim = embedding_dim
-        self.min_count = min_count
-        self.num_sents = num_sents
+        self.embedding_dim = int(embedding_dim)
+        self.min_count = int(min_count)
+        self.num_sents = int(num_sents)
         if '--buildvocab' in sys.argv:
             self.buildvocab = True
         else:
@@ -104,11 +104,11 @@ class GensimSandbox(object):
             print('building vocab...')
             model.build_vocab(self.sentences_generator())
             with open(fname, 'wb') as f:
-                pickle.dump(model, f)
+                dill.dump(model, f)
         else:
             print('depickling model...')
             with open(fname, 'rb') as f:
-                model = pickle.load(f)
+                model = dill.load(f)
         print('Finished building vocab. length of vocab: {}'.format(len(model.vocab)))
         self.model = model
         return self.model
@@ -186,7 +186,7 @@ class GensimSandbox(object):
             with open('gatherer_{}_{}.pkl'.format(count_sents, n), 'rb') as f:
                 t = time.time()
                 import gc; gc.disable()
-                gatherer = pickle.load(f)
+                gatherer = dill.load(f)
                 gc.enable()
                 print('Loading gatherer took {} secs'.format(time.time() - t))
         else:
@@ -199,7 +199,7 @@ class GensimSandbox(object):
             with open('gatherer_{}_{}.pkl'.format(count_sents, n), 'wb') as f:
                 t = time.time()
                 import gc; gc.disable()
-                pickle.dump(gatherer, f)
+                dill.dump(gatherer, f)
                 gc.enable()
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
@@ -411,8 +411,7 @@ class GensimSandbox(object):
 
     def save_metadata(self):
         grandparent_dir = os.path.abspath('runs/{}'.format(self.method))
-        timestamp = str(datetime.datetime.now())
-        parent_dir = grandparent_dir + '/' + timestamp
+        parent_dir = grandparent_dir + '/' + '{}_{}_{}'.format(self.num_sents, self.min_count, self.embedding_dim)
         if not os.path.exists(grandparent_dir):
             os.mkdir(grandparent_dir)
         if not os.path.exists(parent_dir):
@@ -421,10 +420,10 @@ class GensimSandbox(object):
             f.write('Num sents: {}\n'.format(self.num_sents))
             f.write('Min count: {}\n'.format(self.min_count))
             f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
-        self.write_embedding_to_file(parent_dir + '/vectors.txt')
+            f.write('Embedding dim: {}\n'.format(self.embedding_dim))
+        self.write_embedding_to_file(parent_dir + '/vectors_{}.txt'.format(self.method))
         with open(parent_dir + '/vocabmodel', 'wb') as f:
-            pickle.dump(self.model, f)
-        shutil.copyfile('/home/eric/code/gensim/results/vectors_{}'.format(self.method), parent_dir + '/vectors_{}.txt'.format(self.method))
+            dill.dump(self.model, f)
 
     def train(self):
         self.get_model_with_vocab()
