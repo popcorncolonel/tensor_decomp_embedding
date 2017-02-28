@@ -8,10 +8,12 @@ import os
 import pdb
 import scipy
 import scipy.io
+import shutil
 import sys
 import time
 import tensorflow as tf
 
+from embedding_evaluation import write_embedding_to_file, evaluate
 from gensim_utils import batch_generator, batch_generator2
 from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp
@@ -113,54 +115,11 @@ class GensimSandbox(object):
         self.model = model
         return self.model
 
-    def evaluate_embedding(self):
-        rel_path = 'vectors_{}.txt'.format(self.method)
-        self.write_embedding_to_file(rel_path)
-        out_fname = 'results_{}.txt'.format(self.method)
-        # WORD EMBEDDING BENCHMARKS - word similarity, categorization
-        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
-        self.model.syn0 = self.embedding
-        print("most similar to king - man + woman: {}".format(self.model.most_similar(
-            positive=['king', 'woman'], negative=['man'],
-            topn=5,
-        )))
-        print("most similar to king: {}".format(self.model.most_similar(
-            positive=['king'],
-            topn=5,
-        )))
-        print('done evaluating.')
-
     def list_vars_in_checkpoint(self, dirname):
         ''' Just for tf debugging.  '''
         from tensorflow.contrib.framework.python.framework.checkpoint_utils import list_variables
         abspath = os.path.abspath(dirname)
         return list_variables(abspath)
-
-    def write_embedding_to_file(self, fname='vectors.txt'):
-        vectors = {}
-        for word in self.model.vocab:
-            word_vocab = self.model.vocab[word]
-            word_vect = self.embedding[word_vocab.index]
-            vect_list = ['{:.3f}'.format(x) for x in word_vect]
-            vectors[word] = ' '.join(vect_list)
-        count = 0
-        with open(fname, 'w') as f:
-            for word in vectors:
-                if not word:
-                    continue
-                try:
-                    f.write(word.encode('utf-8') + ' ' + vectors[word] + '\n')
-                    count += 1
-                except TypeError:
-                    f.write(word + ' ' + vectors[word] + '\n')
-                    count += 1
-                except:
-                    pass
-        with open(fname, 'r+') as f:
-            content = f.read()
-            f.seek(0, 0)
-            f.write('{} {}\n'.format(count, self.embedding_dim))  # write the number of vects
-            f.write(content)
 
     def train_gensim_embedding(self):
         print('training...')
@@ -251,7 +210,7 @@ class GensimSandbox(object):
         self.C1 = np.dot(C1, D)
         self.C2 = np.dot(C2, D)
 
-        self.evaluate_embedding()
+        evaluate(self.embedding, self.method, self.model)
 
         print('creating saver for embedding viz...')
         saver = tf.train.Saver()
@@ -416,14 +375,20 @@ class GensimSandbox(object):
             os.mkdir(grandparent_dir)
         if not os.path.exists(parent_dir):
             os.mkdir(parent_dir)
+        timestamp = str(datetime.datetime.now())
         with open(parent_dir + '/metadata.txt', 'w') as f:
+            f.write('Evaluation time: {}\n'.format(timestamp))
+            f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
             f.write('Num sents: {}\n'.format(self.num_sents))
             f.write('Min count: {}\n'.format(self.min_count))
-            f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
             f.write('Embedding dim: {}\n'.format(self.embedding_dim))
-        self.write_embedding_to_file(parent_dir + '/vectors_{}.txt'.format(self.method))
-        with open(parent_dir + '/vocabmodel', 'wb') as f:
+        write_embedding_to_file(self.embedding, self.model, parent_dir + '/vectors_{}.txt'.format(self.method))
+        with open(parent_dir + '/embedding.pkl', 'wb') as f:
+            dill.dump(self.embedding, f)
+        with open(parent_dir + '/model.pkl', 'wb') as f:
             dill.dump(self.model, f)
+        shutil.copyfile('/home/eric/code/gensim/results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
+        shutil.copyfile('/home/eric/code/gensim/results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
 
     def train(self):
         self.get_model_with_vocab()
@@ -441,7 +406,7 @@ class GensimSandbox(object):
             self.restore_from_ckpt()
         else:
             raise ValueError('undefined method {}'.format(self.method))
-        self.evaluate_embedding()
+        evaluate(self.embedding, self.method, self.model)
         self.save_metadata()
 
 def main():

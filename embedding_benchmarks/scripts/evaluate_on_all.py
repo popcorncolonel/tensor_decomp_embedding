@@ -18,6 +18,7 @@
 from optparse import OptionParser
 import logging
 import os
+from pandas import ExcelWriter
 from web.embeddings import fetch_GloVe, load_embedding
 from web.datasets.utils import _get_dataset_dir
 from web.evaluate import evaluate_on_all
@@ -85,4 +86,10 @@ if __name__ == "__main__":
     print(results)
     with open(out_fname, 'w') as f:
         results.to_string(f)
+    logger.info("Writing results to excel file...")
+    excel_fname = out_fname.replace('.txt', '.xlsx')
+    writer = ExcelWriter(excel_fname)
+    results.to_excel(writer)
+    writer.save()
+    logger.info("Done.")
 
