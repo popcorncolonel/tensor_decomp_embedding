@@ -357,7 +357,7 @@ class GensimSandbox(object):
         gatherer = self.get_pmi_gatherer(2)
 
         print('Making PPMI tensor for SVD...')
-        dense_ppmi_tensor = gatherer.create_pmi_tensor(positive=True, numpy_dense_tensor=False, debug=True)
+        dense_ppmi_tensor = gatherer.create_pmi_tensor(positive=True, numpy_dense_tensor=True, debug=True)
         del gatherer
 
         embedding_model = PpmiSvdEmbedding(self.model, embedding_dim=self.embedding_dim)

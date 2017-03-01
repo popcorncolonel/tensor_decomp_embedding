@@ -152,7 +152,7 @@ class PpmiSvdEmbedding(TensorEmbedding):
 
         U_d = U[:,:self.embedding_dim]
         V_d = V[:self.embedding_dim, :]  # is this correct? (does it matter?)
-        S_d = np.diag(S[:300])
+        S_d = np.diag(S[:self.embedding_dim])
         sqrt_S_d = scipy.linalg.sqrtm(S_d)
         self.embedding = np.matmul(U_d, sqrt_S_d)
         self.C_embedding = np.matmul(V_d.T, sqrt_S_d)
