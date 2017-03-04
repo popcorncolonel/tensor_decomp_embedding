@@ -3,7 +3,7 @@ min_count = 800
 num_sents = 5e6
 
 all:
-	python3 -m pdb -c continue test_gensim.py
+	python3 -m pdb -c continue test_gensim.py --method=$(method) --min_count=$(min_count) --num_sents=$(num_sents)
 buildvocab:
 	python3 -m pdb -c continue test_gensim.py --method=$(method) --min_count=$(min_count) --num_sents=$(num_sents) --buildvocab
 cnn:
@@ -14,6 +14,8 @@ cp:
 	python3 -m pdb -c continue test_gensim.py --method=cp_decomp --min_count=$(min_count) --num_sents=$(num_sents)
 svd:
 	python3 -m pdb -c continue test_gensim.py --method=svd --min_count=$(min_count) --num_sents=$(num_sents)
+sktensor:
+	python3 -m pdb -c continue test_gensim.py --method=sktensor --min_count=$(min_count) --num_sents=$(num_sents)
 restore_ckpt:
 	python3 -m pdb -c continue test_gensim.py --method=restore_ckpt --min_count=$(min_count) --num_sents=$(num_sents)
 loadmatlab:

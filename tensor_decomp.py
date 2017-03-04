@@ -78,7 +78,7 @@ class CPDecomp(object):
             [
                 self.train_ops, # might need multiple train ops to be executed sequentially (see the case of sals)
                 self.global_step,
-                self.D1, self.D2, self.D3, self.grad_value_U, self.grad_value_V, self.grad_value_W, 
+                #self.D1, self.D2, self.D3, self.grad_value_U, self.grad_value_V, self.grad_value_W, 
             ],
             feed_dict=feed_dict,
         )

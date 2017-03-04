@@ -156,6 +156,12 @@ class PpmiSvdEmbedding(TensorEmbedding):
         sqrt_S_d = scipy.linalg.sqrtm(S_d)
         self.embedding = np.matmul(U_d, sqrt_S_d)
         self.C_embedding = np.matmul(V_d.T, sqrt_S_d)
+        predicted = np.dot(self.embedding, self.C_embedding.T)
+        print("RMSE: {}".format(np.sqrt(((ppmi_tensor - predicted) ** 2).mean())))
+        predicted = np.dot(np.dot(U_d, S_d), V_d)
+        print("RMSE (2): {}".format(np.sqrt(((ppmi_tensor - predicted) ** 2).mean())))
+        import pdb; pdb.set_trace()
+        pass
 
     def get_embedding_matrix(self):
         return self.embedding
@@ -341,7 +347,7 @@ class PMIGatherer(object):
             #import pdb; pdb.set_trace()
             pass
         n_fact = int(scipy.misc.factorial(self.n))
-        indices_extended = np.zeros((n_fact*len(indices), self.n), dtype=np.uint16)
+        indices_extended = np.zeros((n_fact*len(indices), self.n), dtype=np.int16)
         values_extended = np.zeros((n_fact*len(indices),), dtype=np.float32)
         for i in range(len(indices)):
             tup = indices[i]
