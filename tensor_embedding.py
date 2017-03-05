@@ -303,7 +303,7 @@ class PMIGatherer(object):
             pass
         return indices
 
-    def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False, limit_large_vals=False):
+    def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False, limit_large_vals=False, symmetric=False):
         print('Creating Sparse PMI tensor...')
         t = time.time()
         if batch:
@@ -346,19 +346,20 @@ class PMIGatherer(object):
             print('n largest took {} sec'.format(time.time() - t))
             #import pdb; pdb.set_trace()
             pass
-        n_fact = int(scipy.misc.factorial(self.n))
-        indices_extended = np.zeros((n_fact*len(indices), self.n), dtype=np.int16)
-        values_extended = np.zeros((n_fact*len(indices),), dtype=np.float32)
-        for i in range(len(indices)):
-            tup = indices[i]
-            j = 0
-            for perm in itertools.permutations(range(self.n)):
-                for k, sigma in enumerate(perm):
-                    indices_extended[n_fact*i+j][perm[k]] = tup[k]
-                    values_extended[n_fact*i+j] = values[i]
-                j += 1
-        indices = indices_extended
-        values = values_extended
+        if not symmetric:
+            n_fact = int(scipy.misc.factorial(self.n))
+            indices_extended = np.zeros((n_fact*len(indices), self.n), dtype=np.int16)
+            values_extended = np.zeros((n_fact*len(indices),), dtype=np.float32)
+            for i in range(len(indices)):
+                tup = indices[i]
+                j = 0
+                for perm in itertools.permutations(range(self.n)):
+                    for k, sigma in enumerate(perm):
+                        indices_extended[n_fact*i+j][perm[k]] = tup[k]
+                        values_extended[n_fact*i+j] = values[i]
+                    j += 1
+            indices = indices_extended
+            values = values_extended
         if numpy_dense_tensor:
             ''' Probably not gonna wanna do this if you're bigger than 2 dimensions. '''
             ppmi_tensor = np.zeros(shape)

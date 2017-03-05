@@ -16,7 +16,7 @@ import tensorflow as tf
 from embedding_evaluation import write_embedding_to_file, evaluate, EmbeddingTaskEvaluator
 from gensim_utils import batch_generator, batch_generator2
 from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
-from tensor_decomp import CPDecomp
+from tensor_decomp import CPDecomp, SymmetricCPDecomp
 from nltk.corpus import stopwords
 
 
@@ -163,16 +163,16 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_online_cp_decomp_embedding(self):
+    def train_online_cp_decomp_embedding(self, symmetric=True):
         gatherer = self.get_pmi_gatherer(3)
 
-        def sparse_tensor_batches(batch_size=50000, debug=False):
+        def sparse_tensor_batches(batch_size=50000, debug=False, symmetric=symmetric):
             '''
             because we are using batch_generator2, batches carry much much more information. (and we get through `sentences` much more quickly) 
             '''
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=5e6), batch_size=batch_size)
             for batch in batches:
-                sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug)
+                sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(batch=batch, positive=True, debug=debug, symmetric=symmetric)
                 yield sparse_ppmi_tensor_pair
 
         '''
@@ -187,28 +187,36 @@ class GensimSandbox(object):
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            decomp_method = CPDecomp(shape=(len(self.model.vocab),)*3, rank=self.embedding_dim, sess=self.sess, optimizer_type='adam', reg_param=1e-10)
+            if symmetric:
+                decomp_method = SymmetricCPDecomp(dim=len(self.model.vocab), rank=self.embedding_dim, sess=self.sess, optimizer_type='adam', reg_param=1e-10)
+            else:
+                decomp_method = CPDecomp(shape=(len(self.model.vocab),)*3, rank=self.embedding_dim, sess=self.sess, optimizer_type='adam', reg_param=1e-10)
         print('Starting CP Decomp training')
         decomp_method.train(sparse_tensor_batches(), checkpoint_every=100)
         del gatherer
 
         U = decomp_method.U.eval(self.sess)
-        V = decomp_method.V.eval(self.sess)
-        W = decomp_method.W.eval(self.sess)
+        if not symmetric: 
+            V = decomp_method.V.eval(self.sess)
+            W = decomp_method.W.eval(self.sess)
 
         lambdaU = np.linalg.norm(U, axis=0)
-        lambdaV = np.linalg.norm(V, axis=0)
-        lambdaW = np.linalg.norm(W, axis=0)
+        if not symmetric:
+            lambdaV = np.linalg.norm(V, axis=0)
+            lambdaW = np.linalg.norm(W, axis=0)
 
         embedding = U / lambdaU
-        C1 = V / lambdaV
-        C2 = W / lambdaW
+        if not symmetric:
+            C1 = V / lambdaV
+            C2 = W / lambdaW
 
-        lambda_ = lambdaU * lambdaV * lambdaW
+            lambda_ = lambdaU * lambdaV * lambdaW
+            self.C1 = np.dot(C1, D)
+            self.C2 = np.dot(C2, D)
+        else:
+            lambda_ = lambdaU
         D = np.diag(lambda_ ** (1/3))
         self.embedding = np.dot(embedding, D)
-        self.C1 = np.dot(C1, D)
-        self.C2 = np.dot(C2, D)
 
         import pdb; pdb.set_trace()
         self.evaluate_embedding()
