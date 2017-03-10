@@ -303,8 +303,19 @@ class PMIGatherer(object):
             pass
         return indices
 
-    def create_pmi_tensor(self, batch=None, positive=True, numpy_dense_tensor=False, debug=False, limit_large_vals=False, symmetric=False):
-        print('Creating Sparse PMI tensor...')
+    def create_pmi_tensor(self, 
+        batch=None,
+        positive=True,
+        numpy_dense_tensor=False,
+        debug=False,
+        symmetric=False,
+        log_info=True,
+        limit_large_vals=False,
+        neg_sample: int=False,
+        pmi=True,
+    ):
+        if log_info:
+            print('Creating Sparse PMI tensor...', end='')
         t = time.time()
         if batch:
             indices = self.get_indices(batch, return_set=True)
@@ -314,26 +325,44 @@ class PMIGatherer(object):
 
         values = np.zeros(len(indices), dtype=np.float32) 
         for i in range(len(indices)):
-            values[i] += self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
+            if pmi:
+                values[i] = self.PMI(*indices[i])  # NOTE: if this becomes unbearably slow, you are out of ram. decrease batch size. 
+            else:
+                values[i] += self.n_counts[indices[i]]
         shape = (self.vocab_len,) * self.n
         indices = np.asarray(indices, dtype=np.uint16)
         if limit_large_vals:
             new_indices = []
-            new_values = []
+            new_vals = []
             for val, ix in zip(values, indices):
-                # exclude things like (0, 1, 2385) but include things like (2543, 13782, 3278) and (0, 43589, 3482)
                 if len(np.where(ix < 15)[0]) <= 1:
                     new_indices.append(ix)
-                    new_values.append(val)
+                    new_vals.append(val)
             indices = np.array(new_indices)
-            values = np.array(new_values)
-
+            values = np.array(new_vals)
         num_total_vals = len(values)
         if positive:
             positive_args = np.argwhere(values > 0.0)
             indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])
             values = np.squeeze(values[positive_args])
             #print('{} nonzero pmi\'s out of {} total (=> {} total entries)'.format(len(values), num_total_vals, 6*len(values)))
+        if neg_sample:
+            '''
+            Add random values with zero PMI so it doesn't just predict everything to have (mean) PMI
+            '''
+            new_indices = []
+            new_values = []
+            for _ in range(neg_sample):
+                i = random.randint(0, len(self.model.vocab))
+                j = random.randint(i, len(self.model.vocab))
+                k = random.randint(j, len(self.model.vocab))
+                if (i,j,k) not in self.n_counts:
+                    new_indices.append([i, j, k])
+                    new_values.append(0.0)
+            new_indices = np.array(new_indices)
+            new_values = np.array(new_values)
+            indices = np.vstack((indices, new_indices))
+            values = np.concatenate((values, new_values))
         if debug and self.debug:
             # self.debug so we can turn it off (in pdb) whenever we want
             t = time.time()
@@ -366,8 +395,8 @@ class PMIGatherer(object):
             for val, ix in zip(values, indices):
                 ppmi_tensor[tuple(ix)] += val
             return ppmi_tensor
-        print('total #values: {}...'.format(len(indices)), end='')
-        print('took {} secs'.format(int(time.time() - t)))
+        if log_info:
+            print('total #values: {}...'.format(len(indices)), end='')
+            print('took {} secs'.format(int(time.time() - t)))
         return (indices, values)
-        
 

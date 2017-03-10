@@ -2,6 +2,7 @@ import numpy as np
 import random
 import os
 import sklearn
+import tensorflow as tf
 
 from sklearn.linear_model import LogisticRegression
 
@@ -52,14 +53,16 @@ def evaluate(embedding, method, model):
 
 
 class EmbeddingTaskEvaluator(object):
-    def __init__(self, method: str, normalize_vects: bool = True):
+    def __init__(self, method: str, fname: str=None, normalize_vects: bool=True):
         '''
-        `self.embedding_dict` is a dict mapping words (strings) to their embedding
+        `fname` is the name of an embedding vectors file 
         '''
         self.embedding_dict = {}
-        fname = 'vectors_{}.txt'.format(method)
+        if fname is None:
+            fname = 'vectors_{}.txt'.format(method)
         #fname = 'vectors_random.txt'
         #fname = 'runs/loadmatlab/30000000_5000_100/vectors.txt'
+        self.fname = fname
         with open(fname, 'r') as f:
             for i, line in enumerate(list(f)):
                 line = line.strip()
@@ -106,22 +109,7 @@ class EmbeddingTaskEvaluator(object):
         LR.fit(X, y)
         score = LR.score(X_test, y_test)
         print('Score: {}'.format(score))
-        import pdb; pdb.set_trace()
         return score
-
-    def get_sent_class_data(self, split_type='train'):
-        from sklearn.datasets import fetch_20newsgroups
-        if split_type == 'train':
-            data = fetch_20newsgroups(subset='train')
-        elif split_type == 'test':
-            data = fetch_20newsgroups(subset='test')
-        else:
-            raise ValueError('Unrecognized split type {}'.format(split_type))
-        import pdb; pdb.set_trace()
-        return data
-
-    def sent_classification_tasks(self):
-        data = self.get_sent_class_data()
 
     def get_analogy_data(self, split_type='train'):
         from embedding_benchmarks.scripts.web.datasets.analogy import fetch_google_analogy
@@ -294,4 +282,112 @@ class EmbeddingTaskEvaluator(object):
         print('accuracy: {}/{}={}%'.format(correct, len(X_test), 100.0*correct / float(len(X_test))))
         import pdb; pdb.set_trace()
         pass
+
+    def get_sent_class_data(self, split_type='train'):
+        from sklearn.datasets import fetch_20newsgroups
+        if split_type == 'train':
+            data = fetch_20newsgroups(subset='train')
+        elif split_type == 'test':
+            data = fetch_20newsgroups(subset='test')
+        else:
+            raise ValueError('Unrecognized split type {}'.format(split_type))
+        from nltk import word_tokenize
+        print('transforming data...')
+        tokenized_data = [word_tokenize(sent) for sent in data.data]
+        X_data = [np.array([self.embedding_dict[w.lower()] for w in sent if w.lower() in self.embedding_dict]) for sent in tokenized_data]
+        y_data = data.target
+        return X_data, y_data
+
+    def _build_sent_class_CNN(self, X_train, y_train):
+        max_sent_len = max([x.shape[0] for x in X_train])
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+        )
+        sess = tf.Session(config=config)
+        with sess.as_default():
+            with tf.device('/gpu:0'):
+                input_x = tf.placeholder(tf.float32, [None, max_sent_len, self.embedding_dim], name='input_x')
+                input_y = tf.placeholder(tf.int64, [None, 20], name='input_y') # Index of correct category
+
+                filter_sizes = [3,4]
+                num_filters = 10
+
+                pooled_outputs = []
+                num_features_total = 0
+                input_expanded = tf.expand_dims(input_x, -1)  # only one initial feature map
+                for filter_size in filter_sizes:
+                    with tf.name_scope('conv-maxpool-{}'.format(filter_size)):
+                        filter_shape = [filter_size, self.embedding_dim, 1, num_filters]
+                        W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                        b = tf.Variable(tf.constant(0.0, shape=[num_filters]), name='b')
+                        conv = tf.nn.conv2d(
+                            input=input_expanded,
+                            filter=W,
+                            strides=[1,1,1,1],
+                            padding='VALID',
+                            use_cudnn_on_gpu=True,
+                            name='conv',
+                        )
+                        h = tf.nn.relu(tf.nn.bias_add(conv, b), name='relu')
+                        stride = 5
+                        pooled = tf.nn.max_pool(
+                            h,
+                            ksize = [1, stride, 1, 1],
+                            strides=[1, stride, 1, 1],
+                            padding='VALID',
+                            name='pooling',
+                        )
+                        # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
+                        num_features_total += num_filters*int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride)))
+                        import pdb; pdb.set_trace()
+                        pooled_outputs.append(pooled)
+                # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
+                # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
+                h_pool = tf.concat(1, pooled_outputs)
+                # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
+                assert num_features_total == h_pool._shape[1] * h_pool._shape[3] == 20
+                h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
+                with tf.name_scope('dropout'):
+                    h_drop = tf.nn.dropout(h_pool_flat, 0.5)
+                h = h_drop
+                loss = tf.cross_entropy_with_logits(labels=input_y, logits=h)
+
+    def sent_classification_tasks(self):
+        X_train, y_train = self.get_sent_class_data('train')
+        self._build_sent_class_CNN(X_train, y_train)
+
+
+class EmbeddingComparison(object):
+    def __init__(self, run_data):
+        '''
+        `run_data` is a list of (method, num_sents, min_count, embedding_dim) tuples (indexing into the `runs` directory
+        '''
+        self.evaluators = []
+        for method, num_sents, min_count, embedding_dim in run_data:
+            fname = 'runs/{method}/{num_sents}_{min_count}_{embedding_dim}/vectors.txt'.format(**locals())
+            self.evaluators.append(EmbeddingTaskEvaluator(method='{method}_{num_sents}_{min_count}'.format(**locals()), fname=fname))
+
+    def compare_word_classification(self):
+        score_dict = {}
+        for evaluator in self.evaluators:
+            method = evaluator.method
+            score = evaluator.word_classification_tasks()
+            print("{} word classification score: {}".format(method, score))
+            with open('results/word_classification_comparison.txt', 'w') as f:
+                print("{} word classification score: {}".format(method, score), file=f)
+            score_dict[method] = score
+        return score_dict
+
+
+if __name__ == '__main__':
+    run_data = [('svd', 5000000, 800, 100), ('svd', 30000000, 1000, 100)]
+    comparator = EmbeddingComparison(run_data)
+    score_dict = comparator.compare_word_classification()
+    import pdb; pdb.set_trace()
+    method = 'svd'
+    evaluator = EmbeddingTaskEvaluator(method)
+    #evaluator.word_classification_tasks()
+    #evaluator.analogy_tasks()
+    evaluator.sent_classification_tasks()
+
 
