@@ -793,6 +793,7 @@ class Word2Vec(utils.SaveLoad):
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='CBOW',
+                    gpu=False,
                 )
             elif self.cnn:
                 self.embedding_model = WordEmbedding(

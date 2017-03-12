@@ -158,10 +158,6 @@ class PpmiSvdEmbedding(TensorEmbedding):
         self.C_embedding = np.matmul(V_d.T, sqrt_S_d)
         predicted = np.dot(self.embedding, self.C_embedding.T)
         print("RMSE: {}".format(np.sqrt(((ppmi_tensor - predicted) ** 2).mean())))
-        predicted = np.dot(np.dot(U_d, S_d), V_d)
-        print("RMSE (2): {}".format(np.sqrt(((ppmi_tensor - predicted) ** 2).mean())))
-        import pdb; pdb.set_trace()
-        pass
 
     def get_embedding_matrix(self):
         return self.embedding

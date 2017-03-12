@@ -24,8 +24,10 @@ from web.datasets.utils import _get_dataset_dir
 from web.evaluate import evaluate_on_all
 
 
+level = logging.DEBUG
+level = logging.WARNING
 # Configure logging
-logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level=logging.DEBUG, datefmt='%I:%M:%S')
+logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level=level, datefmt='%I:%M:%S')
 logger = logging.getLogger(__name__)
 
 parser = OptionParser()

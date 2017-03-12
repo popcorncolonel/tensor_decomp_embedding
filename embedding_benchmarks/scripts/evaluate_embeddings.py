@@ -23,7 +23,9 @@ parser.add_option("-o", "--output_dir", type="str", default="")
 (opts, args) = parser.parse_args()
 
 # Configure logging
-logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level=logging.DEBUG, datefmt='%I:%M:%S')
+level = logging.DEBUG
+level = logging.WARNING
+logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level=level, datefmt='%I:%M:%S')
 logger = logging.getLogger(__name__)
 
 jobs = []

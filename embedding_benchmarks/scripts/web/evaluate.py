@@ -331,7 +331,7 @@ def evaluate_similarity(w, X, y):
             if query_word not in words:
                 missing_words += 1
     if missing_words > 0:
-        print("Missing {} words out of {} total words in test ({}% of words are missing).".format(missing_words, total_words, missing_words / total_words * 100.0))
+        logger.info("Missing {} words out of {} total words in test ({}% of words are missing).".format(missing_words, total_words, missing_words / total_words * 100.0))
         #logger.warning("Missing {} words. Will replace them with mean vector".format(missing_words))
 
 

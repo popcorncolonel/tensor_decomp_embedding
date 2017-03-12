@@ -380,19 +380,14 @@ class SymmetricCPDecomp(object):
             self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
             import dill  # load a previous embedding for initialization?
-            """
-            self.U = tf.Variable(tf.random_uniform(
-                shape=[dim, self.rank],
-                minval=-1.0,
-                maxval=1.0,
-            ), name="U")
-            """
             mu = 10.0
             self.U = tf.Variable(tf.random_normal(
                 shape=[dim, self.rank],
                 mean=(1. / self.rank) * (mu ** (1/self.ndims)),
                 stddev=.1,
             ), name="U")
+            if self.nonneg:
+                self.sparse_U = tf.nn.relu(self.U, name='Sparse_U')
         self.create_loss_fn(reg_param=reg_param)
 
     def evaluate(self, X):
@@ -474,20 +469,20 @@ class SymmetricCPDecomp(object):
             with tf.device('/gpu:1'):
                 X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
 
-                U_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
-                V_indices = tf.gather(indices, 1)
-                W_indices = tf.gather(indices, 2)
-                U_vects = tf.gather(U, U_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
-                V_vects = tf.gather(U, V_indices)
-                W_vects = tf.gather(U, W_indices)
-                if self.nonneg:
-                    U_vects = tf.nn.relu(U_vects)
-                    V_vects = tf.nn.relu(V_vects)
-                    W_vects = tf.nn.relu(W_vects)
+                first_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
+                second_indices = tf.gather(indices, 1)
+                third_indices = tf.gather(indices, 2)
+                first_vects = tf.gather(U, first_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
+                second_vects = tf.gather(U, second_indices)
+                third_vects = tf.gather(U, third_indices)
+                if self.nonneg:  # negative values now do not contribute to tensor prediction
+                    first_vects = tf.nn.relu(first_vects)
+                    second_vects = tf.nn.relu(second_vects)
+                    third_vects = tf.nn.relu(third_vects)
 
                 # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, U_j, U_k>, as a triple dot product (for each i,j,k in X)
                 # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * U_jr * U_kr, where X.indices[m] = i,j,k.
-                elementwise_product = tf.multiply(tf.multiply(U_vects, V_vects), W_vects)  # of shape (N, R)
+                elementwise_product = tf.multiply(tf.multiply(first_vects, second_vects), third_vects)  # of shape (N, R)
                                                                                     
                 predicted_X_ijks = tf.reduce_sum(elementwise_product, axis=1)  # of shape (N,) - represents Sum_{r=1}^R U_ir U_jr U_kr
                 errors = tf.squared_difference(X_ijks, predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
@@ -497,23 +492,25 @@ class SymmetricCPDecomp(object):
                 return mean_loss
 
         def reg(U):
-            # NOTE: l2_loss already squares the norms. So we don't need to square them.
             with tf.device('/gpu:1'):
                 if self.nonneg:
-                    return (.5 * reg_param) * tf.nn.l1_loss(U, name="U_norm")
+                    return reg_param * tf.reduce_sum(tf.abs(U))
                 else:
-                    return (.5 * reg_param) * tf.nn.l2_loss(U, name="U_norm")
+                    # NOTE: l2_loss already squares the norms. So we don't need to square them.
+                    return .5  * reg_param * tf.nn.l2_loss(U, name="U_L2_norm")
 
         if reg_param > 0.0:
             self.loss = L(self.X_t, self.U) + reg(self.U)
         else:
             self.loss = L(self.X_t, self.U)
-        if self.nonneg:
+        '''
+        if self.non neg:
             #self.loss += tf.reduce_sum(tf.abs(self.U) - self.U)
             #subzero_indices = tf.where(self.U < 0) 
             #self.loss += -tf.minimum(tf.reduce_sum(tf.gather(self.U, subzero_indices)), 0)
             #self.loss += 25 * -tf.minimum(tf.reduce_min(self.U), 0)
             pass
+        '''
         
     def get_train_ops(self):
         if self.optimizer_type == 'adam':

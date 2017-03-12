@@ -15,19 +15,21 @@ class WordEmbedding(object):
         embedding_size,
         context_size,  # = 2 * vocab_model.window (= 10)
         method=None,
+        gpu=True,
     ):
         self.vocab_model = vocab_model
         self.vocab = vocab_model.vocab
         self.embedding_size = embedding_size
         self.context_size = context_size
         self.method = method
+        self.gpu = gpu
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            with tf.device('/gpu:0'):
+            with tf.device('/{}'.format('gpu:0' if gpu else 'cpu:0')):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
                 self.create_embedding_layer()
@@ -133,9 +135,9 @@ class WordEmbedding(object):
         inv = tf.matrix_inverse(tf.batch_matmul(context_T, context_matrix) + identity)  #  (W^T * W)^-1   
         proj_matrix = tf.batch_matmul(tf.batch_matmul(context_matrix, inv), context_T)  # W * ((W^T * W)^-1) * W^T
         word_T = tf.nn.embedding_lookup(self.word_embedding, self.input_y)
-        word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1x300-dimensional matrix, and we want a 300x1-dimensional one. 
+        word = tf.transpose(word_T, perm=[0, 2, 1])  # again, we keep the 0 axis in line because of minibatching. Embedding lookup returns a 1xk-dimensional matrix, and we want a k-dimensional one. 
         self.h = tf.batch_matmul(proj_matrix, word)  # W * ((W^T * W)^-1) * W^T * v_i
-        self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,300,1) tensor into a (?,300) tensor
+        self.h = tf.unstack(self.h, axis=2)[0]  # turn the hidden output from a (?,k,1) tensor into a (?,k) tensor
 
     def embed_with_tensor_train(self, r):
         '''
@@ -166,7 +168,7 @@ class WordEmbedding(object):
         h = lookup(0, self.input_x[:, 0])
         for i in range(1, self.context_size):
             h = tf.batch_matmul(h, lookup(i, self.input_x[:, i]))
-        h = tf.unstack(h, axis=1)[0]  # turn the hidden output from a (?,1,300) tensor into a (?,300) tensor
+        h = tf.unstack(h, axis=1)[0]  # turn the hidden output from a (?,1,k) tensor into a (?,k) tensor
         self.h = h
 
     def create_embedding_layer(self):
@@ -220,7 +222,7 @@ class WordEmbedding(object):
         self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        with tf.name_scope('loss'), tf.device('/gpu:0'):
+        with tf.name_scope('loss'), tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
             sampled_candidates, true_expected_count, sampled_expected_count = tf.nn.learned_unigram_candidate_sampler(
                 true_classes=self.input_y,
                 num_true=1,
@@ -324,11 +326,10 @@ class WordEmbedding(object):
             self.saver = tf.train.Saver(tf.global_variables(), write_version=tf.train.SaverDef.V2)
             ######## /Misc housekeeping ###########
 
-        with tf.device('/gpu:0'):
-            self.global_step = tf.Variable(0, name='global_step', trainable=False)
-            self.step = 0
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        self.step = 0
 
-        with tf.device('/gpu:0'):
+        with tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
 
@@ -345,7 +346,7 @@ class WordEmbedding(object):
             y_batch = np.reshape(y_batch, (len(y_batch), 1))
             if self.step % 5000 == 1:
                 self.dev_step(x_batch, y_batch)
-            #if self.step > 0 and self.step % 30000 == 0:
+            #if self.step > 0 and self.step % 50000 == 0:
             #    print('Saving checkpoint at step {}...'.format(self.step))
             #    path = self.saver.save(self.sess, checkpoint_prefix, global_step=self.step)
             #    print('Saved model checkpoint to {}'.format(path))

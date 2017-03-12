@@ -26,7 +26,7 @@ stopwords = stopwords.union(grammar_stopwords)
 
 
 class GensimSandbox(object):
-    def __init__(self, method, embedding_dim, num_sents=1e6, min_count=100):
+    def __init__(self, method, embedding_dim, num_sents, min_count):
         self.method = method
         self.embedding_dim = int(embedding_dim)
         self.min_count = int(min_count)
@@ -90,18 +90,6 @@ class GensimSandbox(object):
             size=self.embedding_dim,
             min_count=self.min_count,
         )
-        model.tt = 0
-        model.cbow = 0
-        model.cnn = 0
-        model.subspace = 0
-        if self.method == 'tt':
-            model.tt = 1
-        elif self.method == 'subspace':
-            model.subspace = 1
-        elif self.method == 'cbow':
-            model.cbow = 1
-        elif self.method == 'cnn':
-            model.cnn = 1
         if self.buildvocab or not os.path.exists(fname):
             print('building vocab...')
             model.build_vocab(self.sentences_generator())
@@ -111,6 +99,19 @@ class GensimSandbox(object):
             print('depickling model...')
             with open(fname, 'rb') as f:
                 model = dill.load(f)
+        model.tt = 0
+        model.cbow = 0
+        model.cnn = 0
+        model.subspace = 0
+        model.vector_size = self.embedding_dim
+        if self.method == 'tt':
+            model.tt = 1
+        elif self.method == 'subspace':
+            model.subspace = 1
+        elif self.method == 'cbow':
+            model.cbow = 1
+        elif self.method == 'cnn':
+            model.cnn = 1
         print('Finished building vocab. length of vocab: {}'.format(len(model.vocab)))
         self.model = model
         return self.model
@@ -164,7 +165,7 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_online_cp_decomp_embedding(self, symmetric=True, nonneg=False):
+    def train_online_cp_decomp_embedding(self, symmetric: bool, nonneg: bool):
         gatherer = self.get_pmi_gatherer(3)
 
         def sparse_tensor_batches(n_repetitions=1, debug=True, symmetric=symmetric):
@@ -172,9 +173,10 @@ class GensimSandbox(object):
             for i in range(n_repetitions):
                 yield (indices, values)
 
-        def sparse_tensor_batches(batch_size=800, symmetric=symmetric):
+        def sparse_tensor_batches(batch_size=2000, symmetric=symmetric):
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
-            for batch in batches:
+            for batch in batches: # batch_size == 1500 => 24k entries. batch_size == 3000 => 45k entries
+                approx_num_entries = 15 * batch_size
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
                     batch=batch,
                     positive=True,
@@ -182,7 +184,7 @@ class GensimSandbox(object):
                     symmetric=symmetric,
                     log_info=False,
                     limit_large_vals=False,
-                    neg_sample=100,
+                    neg_sample=int(.35 * approx_num_entries),
                     pmi=True,
                 )
                 yield sparse_ppmi_tensor_pair
@@ -198,7 +200,7 @@ class GensimSandbox(object):
                     rank=self.embedding_dim,
                     sess=self.sess,
                     optimizer_type='adam',
-                    reg_param=0.0,
+                    reg_param=1e-8,
                     nonneg=nonneg,
                 )
             else:
@@ -211,7 +213,6 @@ class GensimSandbox(object):
                 )
         print('Starting CP Decomp training')
         decomp_method.train(sparse_tensor_batches(), checkpoint_every=1000)
-        # WORK ON IMPROVING THE LOSS
 
         U = decomp_method.U.eval(self.sess)
         if not symmetric: 
@@ -232,21 +233,31 @@ class GensimSandbox(object):
             self.embedding = np.dot(embedding, D)
         else:
             self.embedding = U.copy()
-        sparse_embedding = U.clip(min=0)
-        self.embedding = sparse_embedding
-        #self.embedding = U
+        if nonneg:
+            sparse_embedding = U.clip(min=0)
+            self.embedding = sparse_embedding
+        else:
+            self.embedding = U
         #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
 
         self.evaluate_embedding()
 
+    def create_embedding_visualization(self):
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+        )
+        sess = tf.Session(config=config)
+        with sess.as_default():
+            U = tf.Variable(self.embedding, name='U')
+            sparse_U = tf.nn.relu(U, name='Sparse_U')
         print('creating saver for embedding viz...')
         saver = tf.train.Saver()
 
-        LOG_DIR = 'tf_logs'
+        LOG_DIR = 'tf_logs/{}_{}_{}'.format(self.method, self.num_sents, self.min_count)
         LOG_DIR = os.path.join(LOG_DIR, 'embedding_viz')
-        print('saving matrices to model.ckpt...')
+        print('Saving embeddings to {}...'.format(LOG_DIR))
         if not os.path.exists(LOG_DIR): os.makedirs(LOG_DIR)
-        saver.save(self.sess, os.path.join(LOG_DIR, "model.ckpt"), decomp_method.global_step)
+        saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"), decomp_method.global_step)
         f = open(LOG_DIR + '/metadata.tsv', 'w')
         for i in range(len(self.model.vocab)): f.write(self.model.index2word[i] + '\n')
         f.close()
@@ -257,13 +268,16 @@ class GensimSandbox(object):
         config = projector.ProjectorConfig()
         embedding = config.embeddings.add()
         embedding.tensor_name = 'U'
-        #embedding.metadata_path = os.path.join(LOG_DIR, 'metadata.tsv')
         embedding.metadata_path = 'metadata.tsv'
+
+        sp_embedding = config.embeddings.add()
+        sp_embedding.tensor_name = 'Sparse_U'
+        sp_embedding.metadata_path = 'metadata.tsv'
 
         projector.visualize_embeddings(summary_writer, config)
         self.save_metadata()
         import pdb; pdb.set_trace()
-        pass # set U to be max(U, 0). then try predicting and evaluating
+        pass # calculate some PPMI's, find RMSE
 
     def sktensor(self):
         gatherer = self.get_pmi_gatherer(3)
@@ -309,8 +323,6 @@ class GensimSandbox(object):
         gatherer = self.get_pmi_gatherer(3)
         print('creating PPMI tensor...')
         indices, values = gatherer.create_pmi_tensor(positive=True, debug=True)
-        #indices = np.array([[1,2,2], [3,3,3]])
-        #values = np.array([6, 9])
         scipy.io.savemat('sp_tensor_{}_{}.mat'.format(self.num_sents, self.min_count), {'indices': indices, 'values': values})
         sys.exit()
 
@@ -356,36 +368,14 @@ class GensimSandbox(object):
                 minval=-1.0,
                 maxval=1.0,
             ), name="U")
-            V = tf.Variable(tf.random_uniform(
-                shape=[len(self.model.vocab), self.embedding_dim],
-                minval=-1.0,
-                maxval=1.0,
-            ), name="V")
-            W = tf.Variable(tf.random_uniform(
-                shape=[len(self.model.vocab), self.embedding_dim],
-                minval=-1.0,
-                maxval=1.0,
-            ), name="W")
-            saver = tf.train.Saver({'U': U, "V": V, "W": W})
-            dirname = '2017-02-24 20:28:06.919189'
+            saver = tf.train.Saver({'U': U})
+            dirname = '2017-03-11 16:24:04.708248'
             saver.restore(sess, tf.train.latest_checkpoint('tf_logs/{}/checkpoints/'.format(dirname)))
             U = U.eval()
-            V = V.eval()
-            W = W.eval()
-            # normalize columns, store in lambda.
-            lambdaU = np.linalg.norm(U, axis=0)
-            lambdaV = np.linalg.norm(V, axis=0)
-            lambdaW = np.linalg.norm(W, axis=0)
 
-            embedding = U / lambdaU
-            C1 = V / lambdaV
-            C2 = W / lambdaW
-
-            lambda_ = lambdaU * lambdaV * lambdaW
-            D = np.diag(lambda_ ** (1/3))
-            self.embedding = np.dot(embedding, D)
-            self.C1 = np.dot(C1, D)
-            self.C2 = np.dot(C2, D)
+            self.embedding = U
+            import pdb; pdb.set_trace()
+            pass
 
     def loadmatlab(self):
         #d = scipy.io.loadmat('../matlab/sp_tensor.mat')

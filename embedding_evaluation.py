@@ -2,6 +2,7 @@ import numpy as np
 import random
 import os
 import sklearn
+import sys
 import tensorflow as tf
 
 from sklearn.linear_model import LogisticRegression
@@ -33,13 +34,11 @@ def write_embedding_to_file(embedding, model, fname='vectors.txt'):
         f.write('{} {}\n'.format(count, embedding.shape[1]))  # write the number of vects
         f.write(content)
 
-
 def evaluate(embedding, method, model):
     rel_path = 'vectors_{}.txt'.format(method)
     write_embedding_to_file(embedding, model, rel_path)
     out_fname = 'results_{}.txt'.format(method)
-    # WORD EMBEDDING BENCHMARKS - word similarity, categorization
-    os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
+    evaluate_vectors_from_path(rel_path, out_fname)
     model.syn0 = embedding
     print("most similar to king - man + woman: {}".format(model.most_similar(
         positive=['king', 'woman'], negative=['man'],
@@ -50,6 +49,9 @@ def evaluate(embedding, method, model):
         topn=5,
     )))
     print('done evaluating.')
+
+def evaluate_vectors_from_path(vector_path, results_path):
+    os.system('python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(vector_path, results_path))
 
 
 class EmbeddingTaskEvaluator(object):
@@ -98,17 +100,15 @@ class EmbeddingTaskEvaluator(object):
             X = sklearn.preprocessing.normalize(X)
         return X, y
 
-    def word_classification_tasks(self):
+    def word_classification_tasks(self, print_score=False):
         X, y = self.get_word_classification_data('train')
-        print("{} training words".format(len(X)))
-        
         X_test, y_test = self.get_word_classification_data('test')
-        print("{} testing words".format(len(X_test)))
 
         LR = LogisticRegression()
         LR.fit(X, y)
         score = LR.score(X_test, y_test)
-        print('Score: {}'.format(score))
+        if print_score:
+            print('Score: {}'.format(score))
         return score
 
     def get_analogy_data(self, split_type='train'):
@@ -356,38 +356,46 @@ class EmbeddingTaskEvaluator(object):
         X_train, y_train = self.get_sent_class_data('train')
         self._build_sent_class_CNN(X_train, y_train)
 
+    def outlier_detection(self, verbose=True):
+        from wikisem500.src.evaluator import Evaluator
+        from wikisem500.src.embeddings import WrappedEmbedding
+        from wikisem500.src.outlier_test_group import TestGroup
+        from wikisem500.src.utils import scandir
 
-class EmbeddingComparison(object):
-    def __init__(self, run_data):
-        '''
-        `run_data` is a list of (method, num_sents, min_count, embedding_dim) tuples (indexing into the `runs` directory
-        '''
-        self.evaluators = []
-        for method, num_sents, min_count, embedding_dim in run_data:
-            fname = 'runs/{method}/{num_sents}_{min_count}_{embedding_dim}/vectors.txt'.format(**locals())
-            self.evaluators.append(EmbeddingTaskEvaluator(method='{method}_{num_sents}_{min_count}'.format(**locals()), fname=fname))
+        def read_dataset_directory(d):
+            for f in scandir(d):
+                if f.name.endswith('.txt') and f.is_file():
+                    yield TestGroup.from_file(f.path)
 
-    def compare_word_classification(self):
-        score_dict = {}
-        for evaluator in self.evaluators:
-            method = evaluator.method
-            score = evaluator.word_classification_tasks()
-            print("{} word classification score: {}".format(method, score))
-            with open('results/word_classification_comparison.txt', 'w') as f:
-                print("{} word classification score: {}".format(method, score), file=f)
-            score_dict[method] = score
-        return score_dict
+        def score_embedding(embedding, groups):
+            evaluator = Evaluator(groups)
+            evaluator.evaluate(embedding)
+            if verbose:
+                print("   RESULTS")
+                print("==============")
+                print("OPP score: %f" % evaluator.opp)
+                print("Accuracy: %f" % evaluator.accuracy)
+                print("---------------------------------")
+                print("Total number of test groups: %d" % evaluator.num_total_groups)
+                print("Number of filtered test groups: %d (%f%%)" % (evaluator.num_filtered_groups, evaluator.percent_filtered_groups))
+                print("Total number of non-OOV test cases: %d" % evaluator.num_cases)
+                print("Number of filtered cluster entities: %d/%d (mean per %% cluster: %f%%)" % (evaluator.num_filtered_cluster_items, evaluator.num_total_cluster_items, evaluator.percent_filtered_cluster_items))
+                print("Number of filtered outlier entities: %d/%d (mean per %% cluster: %f%%)" % (evaluator.num_filtered_outliers, evaluator.num_total_outliers, evaluator.percent_filtered_outliers))
+            return (evaluator.opp, evaluator.accuracy)
+
+        embedding = WrappedEmbedding.from_word2vec(self.fname, binary=False)
+        dataset = list(read_dataset_directory('wikisem500/dataset/en/'))
+        if verbose:
+            print("Scoring...")
+        opp, accuracy = score_embedding(embedding, dataset)
+        return opp, accuracy
 
 
 if __name__ == '__main__':
-    run_data = [('svd', 5000000, 800, 100), ('svd', 30000000, 1000, 100)]
-    comparator = EmbeddingComparison(run_data)
-    score_dict = comparator.compare_word_classification()
-    import pdb; pdb.set_trace()
-    method = 'svd'
+    method = 'cp_decomp'
     evaluator = EmbeddingTaskEvaluator(method)
     #evaluator.word_classification_tasks()
     #evaluator.analogy_tasks()
-    evaluator.sent_classification_tasks()
-
+    #evaluator.sent_classification_tasks()
+    score = evaluator.outlier_detection()
 
