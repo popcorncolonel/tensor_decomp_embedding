@@ -475,10 +475,6 @@ class SymmetricCPDecomp(object):
                 first_vects = tf.gather(U, first_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
                 second_vects = tf.gather(U, second_indices)
                 third_vects = tf.gather(U, third_indices)
-                if self.nonneg:  # negative values now do not contribute to tensor prediction
-                    first_vects = tf.nn.relu(first_vects)
-                    second_vects = tf.nn.relu(second_vects)
-                    third_vects = tf.nn.relu(third_vects)
 
                 # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, U_j, U_k>, as a triple dot product (for each i,j,k in X)
                 # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * U_jr * U_kr, where X.indices[m] = i,j,k.
@@ -499,10 +495,13 @@ class SymmetricCPDecomp(object):
                     # NOTE: l2_loss already squares the norms. So we don't need to square them.
                     return .5  * reg_param * tf.nn.l2_loss(U, name="U_L2_norm")
 
+        U = self.U
+        if self.nonneg:
+            U = self.sparse_U
         if reg_param > 0.0:
-            self.loss = L(self.X_t, self.U) + reg(self.U)
+            self.loss = L(self.X_t, U) + reg(self.U)
         else:
-            self.loss = L(self.X_t, self.U)
+            self.loss = L(self.X_t, U)
         '''
         if self.non neg:
             #self.loss += tf.reduce_sum(tf.abs(self.U) - self.U)
@@ -577,8 +576,14 @@ class SymmetricCPDecomp(object):
                     print("INVALID ARG EXCEPTION: {}. Accidentally noninvertible matrix? There have been {} of these.".format(e, num_invalid_arg_exceptions))
                     import pdb; pdb.set_trace()
                 self.batch_num += 1
-            #if hasattr(self, 'avg_time') and results_file is not None:
-            #    print('avg batch time: {}'.format(self.avg_time), file=results_file)
+            try:
+                path = self.saver.save(self.sess, checkpoint_dir, global_step=tf.train.global_step(self.sess, self.global_step))
+                print('Saved FINAL model checkpoint to {}'.format(path))
+            except Exception as e:
+                print(e)
+                print("Caught exception trying to checkpoint the final model. You're welcome ;)")
+                import pdb; pdb.set_trace()
+                pass
         if self.write_loss:
             self.train_summary_writer.close()
 

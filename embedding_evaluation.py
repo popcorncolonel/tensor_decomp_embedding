@@ -392,7 +392,7 @@ class EmbeddingTaskEvaluator(object):
 
 
 if __name__ == '__main__':
-    method = 'cp_decomp'
+    method = 'cp_decomp_nonneg'
     evaluator = EmbeddingTaskEvaluator(method)
     #evaluator.word_classification_tasks()
     #evaluator.analogy_tasks()

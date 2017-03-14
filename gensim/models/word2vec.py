@@ -774,36 +774,36 @@ class Word2Vec(utils.SaveLoad):
             print("using tf word embedding method. n_iters in batch generator: {}".format(self.iter))
 
             if self.subspace:
-                self.embedding_model = WordEmbedding(
+                embedding_model = WordEmbedding(
                     vocab_model=self,
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='subspace',
                 )
             elif self.tt:
-                self.embedding_model = WordEmbedding(
+                embedding_model = WordEmbedding(
                     vocab_model=self,
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='tensor',
                 )
             elif self.cbow:
-                self.embedding_model = WordEmbedding(
+                embedding_model = WordEmbedding(
                     vocab_model=self,
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='CBOW',
-                    gpu=False,
+                    gpu=True,
                 )
             elif self.cnn:
-                self.embedding_model = WordEmbedding(
+                embedding_model = WordEmbedding(
                     vocab_model=self,
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='cnn',
                 )
-            self.embedding_model.train(batches)
-            self.embedding_model.set_vocab_model_embedding_matrix()
+            embedding_model.train(batches)
+            embedding_model.set_vocab_model_embedding_matrix()
             return
 
         if FAST_VERSION < 0:
