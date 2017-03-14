@@ -278,10 +278,12 @@ class PMIGatherer(object):
                 continue
             for i in range(len(sent) - self.n + 1):
                 if self.n == 2:
-                    if return_set:
-                        indices = indices | get_sorted_sent_indices(sent, i, self.n)
-                    else:
-                        indices.extend(get_sorted_sent_indices(sent, i, self.n))
+                    for j in range(i+1, len(sent)):
+                        index = (sent[i], sent[j]) 
+                        if return_set:
+                            indices.add(index)
+                        else:
+                            indices.append(index)
                 else:
                     for j in range(i+1, len(sent)):
                         for k in range(j+1, len(sent)):
@@ -307,7 +309,7 @@ class PMIGatherer(object):
         symmetric=False,
         log_info=True,
         limit_large_vals=False,
-        neg_sample: int=False,
+        neg_sample_percent: float=0.0,
         pmi=True,
     ):
         if log_info:
@@ -342,21 +344,25 @@ class PMIGatherer(object):
             indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])
             values = np.squeeze(values[positive_args])
             #print('{} nonzero pmi\'s out of {} total (=> {} total entries)'.format(len(values), num_total_vals, 6*len(values)))
-        if neg_sample:
+        if neg_sample_percent > 0.0:
             '''
             Add random values with zero PMI so it doesn't just predict everything to have (mean) PMI
             '''
             new_indices = []
             new_values = []
-            for _ in range(neg_sample):
-                i = random.randint(0, len(self.model.vocab))
-                j = random.randint(i, len(self.model.vocab))
-                k = random.randint(j, len(self.model.vocab))
-                if (i,j,k) not in self.n_counts:
-                    new_indices.append([i, j, k])
+            for _ in range(int(neg_sample_percent * len(indices))):
+                i = random.randint(0, len(self.model.vocab)-1)
+                ix = [i]
+                for _ in range(1, self.n):
+                    if ix[-1]+1 < len(self.model.vocab):
+                        ix.append(random.randint(ix[-1]+1, len(self.model.vocab)-1))
+                if tuple(ix) not in self.n_counts:
+                    if len(ix) < self.n:
+                        continue
+                    new_indices.append(ix)
                     new_values.append(0.0)
-            new_indices = np.array(new_indices)
-            new_values = np.array(new_values)
+            new_indices = np.asarray(new_indices, dtype=np.uint16)
+            new_values = np.asarray(new_values)
             indices = np.vstack((indices, new_indices))
             values = np.concatenate((values, new_values))
         if debug and self.debug:

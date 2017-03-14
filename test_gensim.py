@@ -202,8 +202,8 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_online_cp_decomp_embedding(self, symmetric: bool, nonneg: bool):
-        gatherer = self.get_pmi_gatherer(3)
+    def train_online_cp_decomp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
+        gatherer = self.get_pmi_gatherer(ndims)
 
         def sparse_tensor_batches(n_repetitions=1, debug=True, symmetric=symmetric):
             (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=debug, symmetric=symmetric)
@@ -213,7 +213,6 @@ class GensimSandbox(object):
         def sparse_tensor_batches(batch_size=2000, symmetric=symmetric):
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
             for batch in batches: # batch_size == 1500 => 24k entries. batch_size == 3000 => 45k entries
-                approx_num_entries = 15 * batch_size
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
                     batch=batch,
                     positive=True,
@@ -221,7 +220,7 @@ class GensimSandbox(object):
                     symmetric=symmetric,
                     log_info=False,
                     limit_large_vals=False,
-                    neg_sample=int(.35 * approx_num_entries),
+                    neg_sample_percent=0.35,
                     pmi=True,
                 )
                 yield sparse_ppmi_tensor_pair
@@ -235,9 +234,12 @@ class GensimSandbox(object):
                 n_entries = len(self.model.vocab) * self.embedding_dim
                 reg_param = 10 / n_entries
                 reg_param = 1e-5
+                if ndims == 2:
+                    reg_param = .05  # as per the NNSE paper
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
                     dim=len(self.model.vocab),
+                    ndims=ndims,
                     rank=self.embedding_dim,
                     sess=self.sess,
                     optimizer_type='adam',
@@ -246,7 +248,7 @@ class GensimSandbox(object):
                 )
             else:
                 decomp_method = CPDecomp(
-                    shape=(len(self.model.vocab),)*3,
+                    shape=(len(self.model.vocab),)*ndims,
                     rank=self.embedding_dim,
                     sess=self.sess,
                     optimizer_type='adam',
@@ -278,12 +280,19 @@ class GensimSandbox(object):
             if nonneg:
                 sparse_embedding = U.clip(min=0)
                 self.embedding = sparse_embedding
-                pred_val = lambda x: (sparse_embedding[x[0]] * sparse_embedding[x[1]] * sparse_embedding[x[2]]).sum()
+                def pred_val(x):
+                    prod = sparse_embedding[x[0]]
+                    for i in range(1, ndims):
+                        prod *= sparse_embedding[x[i]]
+                    return prod.sum()
             else:
                 self.embedding = U.copy()
-                pred_val = lambda x: (self.embedding[x[0]] * self.embedding[x[1]] * self.embedding[x[2]]).sum()
+                def pred_val(x):
+                    prod = self.embedding[x[0]]
+                    for i in range(1, ndims):
+                        prod *= self.embedding[x[i]]
+                    return prod.sum()
         #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
-        pred_val = lambda x: (U[x[0]] * U[x[1]] *U[x[2]]).sum()
         err = ((pred_vals - values)**2).mean()
 
         self.evaluate_embedding()
@@ -375,7 +384,7 @@ class GensimSandbox(object):
             for val, ix in zip(values, indices):
                 val = val[0]
                 if cnt > 5e6:
-                    return err / cnt
+                    return np.sqrt(err / cnt)
                 pred_val = pred_xijk(ix[0], ix[1], ix[2])
                 se = (val - pred_val)**2 
                 #print('|{} - {}|^2 = {}'.format(val, pred_val, se))
@@ -456,13 +465,16 @@ class GensimSandbox(object):
         self.start_time = time.time()
         if experiment != '':
             experiment = '_' + experiment.replace(' ', '_')
-        print("experiment name: {}".format(experiment[1:]))
+            print("experiment name: {}".format(experiment[1:]))
         if self.method in ['cp_decomp']:
             self.method += experiment
-            self.train_online_cp_decomp_embedding(symmetric=True, nonneg=False)
+            self.train_online_cp_decomp_embedding(ndims=3, symmetric=True, nonneg=False)
         elif self.method in ['cp_decomp_nonneg']:
             self.method += experiment
-            self.train_online_cp_decomp_embedding(symmetric=True, nonneg=True)
+            self.train_online_cp_decomp_embedding(ndims=3, symmetric=True, nonneg=True)
+        elif self.method in ['nnse']:
+            self.method += experiment
+            self.train_online_cp_decomp_embedding(ndims=2, symmetric=True, nonneg=True)
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
             self.method += experiment
             self.train_gensim_embedding()
@@ -505,7 +517,7 @@ def main():
         return ''
     experiment = input_with_timeout(
         "Enter an experiment name (or press enter for no specific experiment): ",
-        30.0,
+        30.0,  # timeout of 30sec
     )
     print('Creating sandbox with method {}, num_sents {} and min_count {}.'.format(method, num_sents, min_count))
 
@@ -516,7 +528,6 @@ def main():
         min_count=min_count,
     )
     sandbox.train(experiment=experiment)
-    print('vocab len: {}'.format(len(sandbox.model.vocab)))
 
 if __name__ == '__main__':
     main()

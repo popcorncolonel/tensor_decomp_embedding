@@ -14,6 +14,8 @@ cp_nonneg:
 	python3 -m pdb -c continue test_gensim.py --method=cp_decomp_nonneg --min_count=$(min_count) --num_sents=$(num_sents)
 cp:
 	python3 -m pdb -c continue test_gensim.py --method=cp_decomp --min_count=$(min_count) --num_sents=$(num_sents)
+nnse:
+	python3 -m pdb -c continue test_gensim.py --method=nnse --min_count=$(min_count) --num_sents=$(num_sents)
 svd:
 	python3 -m pdb -c continue test_gensim.py --method=svd --min_count=$(min_count) --num_sents=$(num_sents)
 sktensor:

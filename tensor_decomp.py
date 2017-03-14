@@ -93,9 +93,10 @@ class CPDecomp(object):
 
         if step % print_every == 0:
             t = time.time()
-            loss = self.sess.run(
+            err, reg = self.sess.run(
                 [
-                    self.loss,
+                    self.L,
+                    self.reg,
                 ],
                 feed_dict=feed_dict,
             )
@@ -104,7 +105,7 @@ class CPDecomp(object):
             #    self.train_summary_writer.add_summary(loss_summary, step)
 
             batch_time = (time.time() - self.prev_time) / print_every
-            print("Loss at step {}: {} (avg time per batch: {})".format(step, loss, batch_time))
+            print("Err at step {}: {}; reg loss: {} (avg batch time: {})".format(step, err, reg, batch_time))
             self.prev_time = time.time()
             self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
             #print("avg time (per batch, overall): {}".format(self.avg_time))
@@ -469,22 +470,15 @@ class SymmetricCPDecomp(object):
             with tf.device('/gpu:1'):
                 X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
 
-                first_indices = tf.gather(indices, 0)  # of shape (N,) - represents all the indices to get from the U matrix
-                second_indices = tf.gather(indices, 1)
-                third_indices = tf.gather(indices, 2)
-                first_vects = tf.gather(U, first_indices)  # of shape (N, R) - each index represents the 1xR vector found in U_i
-                second_vects = tf.gather(U, second_indices)
-                third_vects = tf.gather(U, third_indices)
-
-                # elementwise multiplication of each of U, V, and W - the first step in getting <U_i, U_j, U_k>, as a triple dot product (for each i,j,k in X)
-                # we are calculating the matrix UVW (of shape N,R), where UVW_(m,:) = U_ir * U_jr * U_kr, where X.indices[m] = i,j,k.
-                elementwise_product = tf.multiply(tf.multiply(first_vects, second_vects), third_vects)  # of shape (N, R)
-                                                                                    
-                predicted_X_ijks = tf.reduce_sum(elementwise_product, axis=1)  # of shape (N,) - represents Sum_{r=1}^R U_ir U_jr U_kr
+                prod_vects = tf.gather(U, tf.gather(indices, 0))
+                for i in range(1, self.ndims):
+                    i_indices = tf.gather(indices, i)  # of shape (N,) - represents all the indices to get from the U matrix
+                    i_vects = tf.gather(U, i_indices)
+                    prod_vects *= i_vects
+                predicted_X_ijks = tf.reduce_sum(prod_vects, axis=1)
+               
                 errors = tf.squared_difference(X_ijks, predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
-
                 mean_loss = tf.reduce_mean(errors)  # average loss per entry in X - scalar!
-
                 return mean_loss
 
         def reg(U):
@@ -498,10 +492,12 @@ class SymmetricCPDecomp(object):
         U = self.U
         if self.nonneg:
             U = self.sparse_U
+        self.L = L(self.X_t, U)
         if reg_param > 0.0:
-            self.loss = L(self.X_t, U) + reg(self.U)
+            self.reg = reg(self.U) 
         else:
-            self.loss = L(self.X_t, U)
+            self.reg = tf.constant(0.0)
+        self.loss = self.L + self.reg
         '''
         if self.non neg:
             #self.loss += tf.reduce_sum(tf.abs(self.U) - self.U)
