@@ -123,7 +123,10 @@ class CPDecomp(object):
             """
             predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.V, x[1]) * tf.gather(self.W, x[2]))
             predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=False)  # elementwise ops are slow as heck. and yet storing all the vects in memory is infeasible. Could try fitting the whole thing in memory just on GPU 1 or something, but it might just not fit. 3*N*R = too much? at what point is it too much?
-            errs = tf.squared_difference(predicted_vals, X.values)
+            if self.loss_type == 'squared':
+                errs = tf.squared_difference(predicted_vals, X.values)
+            elif self.loss_type == 'poisson':  # minimize the KL Divergence between predicted (M) and actual (X^t)
+                errs = predicted_vals - X.values * tf.log(predicted_vals)
             return tf.reduce_mean(errs)
 
         def reg(U,V,W):
@@ -358,7 +361,7 @@ def test_decomp():
 
 
 class SymmetricCPDecomp(object):
-    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True):
+    def __init__(self, dim, rank, sess, loss_type='squared', ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
         `optimizer_type` must be in ('adam', 'sgd', '2sgd')
@@ -372,15 +375,18 @@ class SymmetricCPDecomp(object):
         self.ndims = ndims
         self.sess = sess
         self.nonneg = nonneg
+        self.loss_type = loss_type
+        assert loss_type in ['squared', 'poisson']
+        self.reg_param = reg_param
+        self.gpu = gpu
 
-        with tf.device('/gpu:0'):
+        with tf.device('/{}:0'.format('gpu' if self.gpu else 'cpu')):
             # t-th batch tensor
             self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')  # always fed in in a sorted way
             self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
             shape_sparse = np.array(self.shape, dtype=np.int64)
             self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
-            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
-            import dill  # load a previous embedding for initialization?
+            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
             mu = 10.0
             self.U = tf.Variable(tf.random_normal(
                 shape=[dim, self.rank],
@@ -422,10 +428,9 @@ class SymmetricCPDecomp(object):
         if validate_indices:
             for ix in approx_indices:
                 assert ((sorted(ix) - ix) == 0).all(), 'Indices must be fed in only in sorted order. offending ix: {}'.format(ix)
-        _, loss, loss_summary, step = self.sess.run(
+        _, loss_summary, step = self.sess.run(
             [
                 self.train_ops,
-                self.loss,
                 self.loss_summary,
                 self.global_step,
             ],
@@ -441,8 +446,16 @@ class SymmetricCPDecomp(object):
                 print('Saved model checkpoint to {} (it took {} secs)'.format(path, time.time() - t))
 
         if step % print_every == 0:
+            t = time.time()
+            err, reg = self.sess.run(
+                [
+                    self.L,
+                    self.reg,
+                ],
+                feed_dict=feed_dict,
+            )
             batch_time = (time.time() - self.prev_time) / print_every
-            print("Loss at step {}: {} (avg time per batch: {})".format(step, loss, batch_time))
+            print("Err at step {}: {:.3f}; Reg loss: {:.3f} (lambda = {:.1E}) (Avg batch time: {:.3f})".format(int(step), err, reg, self.reg_param, batch_time))
             self.prev_time = time.time()
             #self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
             #print("avg time (per batch, overall): {}".format(self.avg_time))
@@ -457,17 +470,8 @@ class SymmetricCPDecomp(object):
             """
             X is a sparse tensor. U is dense. 
             """
-
-            '''
-            with tf.device('/gpu:0'):
-                predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.U, x[1]) * tf.gather(self.U, x[2]))
-                predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=True)
-                errs = tf.squared_difference(predicted_vals, X.values)
-                return tf.reduce_mean(errs)
-            '''
-
             indices = tf.transpose(X.indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
-            with tf.device('/gpu:1'):
+            with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
                 X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
 
                 prod_vects = tf.gather(U, tf.gather(indices, 0))
@@ -482,7 +486,7 @@ class SymmetricCPDecomp(object):
                 return mean_loss
 
         def reg(U):
-            with tf.device('/gpu:1'):
+            with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
                 if self.nonneg:
                     return reg_param * tf.reduce_sum(tf.abs(U))
                 else:
@@ -491,7 +495,7 @@ class SymmetricCPDecomp(object):
 
         U = self.U
         if self.nonneg:
-            U = self.sparse_U
+            U = self.sparse_U  #TODO: MSE is for some reason different than the loss. debug some stuff, make some predictions on batches after a few hundred training steps, to make sure we're calculating loss correctly. 
         self.L = L(self.X_t, U)
         if reg_param > 0.0:
             self.reg = reg(self.U) 
@@ -528,7 +532,7 @@ class SymmetricCPDecomp(object):
         self.batch_num = 0
         self.results_file = results_file
         num_invalid_arg_exceptions = 0
-        with tf.device('/gpu:0'):
+        with tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
             print('setting up variables...')
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
             if self.optimizer_type == 'adam':

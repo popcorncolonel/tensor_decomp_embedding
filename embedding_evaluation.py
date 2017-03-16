@@ -39,6 +39,7 @@ def evaluate(embedding, method, model):
     write_embedding_to_file(embedding, model, rel_path)
     out_fname = 'results_{}.txt'.format(method)
     evaluate_vectors_from_path(rel_path, out_fname)
+    model.clear_sims()
     model.syn0 = embedding
     print("most similar to king - man + woman: {}".format(model.most_similar(
         positive=['king', 'woman'], negative=['man'],
@@ -55,7 +56,7 @@ def evaluate_vectors_from_path(vector_path, results_path):
 
 
 class EmbeddingTaskEvaluator(object):
-    def __init__(self, method: str, fname: str=None, normalize_vects: bool=True):
+    def __init__(self, method: str, fname: str=None, normalize_vects: bool=True, nonneg: bool=False):
         '''
         `fname` is the name of an embedding vectors file 
         '''
@@ -71,6 +72,8 @@ class EmbeddingTaskEvaluator(object):
                 if i != 0:  # (skip header)
                     [word, vectstring] = line.split(maxsplit=1)
                     self.embedding_dict[word] = np.fromstring(vectstring, dtype=np.float32, sep=' ')
+                    if nonneg:
+                        self.embedding_dict[word] = self.embedding_dict[word].clip(min=0.0)
                     self.embedding_dim = len(self.embedding_dict[word])
         self.normalize_vects = normalize_vects
         self.method = method

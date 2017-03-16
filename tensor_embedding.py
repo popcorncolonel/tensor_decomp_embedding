@@ -254,20 +254,6 @@ class PMIGatherer(object):
         # set of indices, which are all ordered in ascending order, then we just permute everything at lookup time
         #       i.e. if indices = {(1,2,3)}, the indices gets expanded to [(1,2,3), (2,1,3), (3,2,1), ..., (1,3,2)] and the corresponding PMI vals get added
         #       This decreases computation time (and ram) for PMI. But (negligibly) increases computation time for sorting everything according to (1,2,3)
-        def get_sorted_sent_indices(sorted_sent, i, n):
-            indices = set()
-            if n == 2:
-                for j in range(i+1, len(sorted_sent)):
-                    indices.add((sorted_sent[i], sorted_sent[j]))
-            else:
-                for j in range(i+1, len(sorted_sent)):
-                    for partial_index in get_sorted_sent_indices(sorted_sent, j, n-1):
-                        indices.add((sorted_sent[i], partial_index[0], partial_index[1]))
-            if return_set:
-                return indices
-            else:
-                return list(indices)
-                
         if return_set: 
             indices = set()
         else:
@@ -284,7 +270,7 @@ class PMIGatherer(object):
                             indices.add(index)
                         else:
                             indices.append(index)
-                else:
+                elif self.n == 3:
                     for j in range(i+1, len(sent)):
                         for k in range(j+1, len(sent)):
                             index = (sent[i], sent[j], sent[k]) 
@@ -292,6 +278,15 @@ class PMIGatherer(object):
                                 indices.add(index)
                             else:
                                 indices.append(index)
+                elif self.n == 4:
+                    for j in range(i+1, len(sent)):
+                        for k in range(j+1, len(sent)):
+                            for l in range(k+1, len(sent)):
+                                index = (sent[i], sent[j], sent[k], sent[l])
+                                if return_set:
+                                    indices.add(index)
+                                else:
+                                    indices.append(index)
                 if update_uni_counts:  # for efficiency -- only wanna loop through this once
                     self.uni_counts[sent[i]] += 1
             if update_uni_counts:  # since we don't loop through the last n-1 elements
@@ -351,12 +346,9 @@ class PMIGatherer(object):
             new_indices = []
             new_values = []
             for _ in range(int(neg_sample_percent * len(indices))):
-                i = random.randint(0, len(self.model.vocab)-1)
-                ix = [i]
-                for _ in range(1, self.n):
-                    if ix[-1]+1 < len(self.model.vocab):
-                        ix.append(random.randint(ix[-1]+1, len(self.model.vocab)-1))
-                if tuple(ix) not in self.n_counts:
+                ix = np.random.randint(low=0, high=len(self.model.vocab), size=(self.n,))
+                ix = tuple(sorted(ix))
+                if ix not in self.n_counts:
                     if len(ix) < self.n:
                         continue
                     new_indices.append(ix)

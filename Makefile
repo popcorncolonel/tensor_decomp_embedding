@@ -1,6 +1,6 @@
 method = matlab
 min_count = 2000
-num_sents = 10e6
+num_sents = 20e6
 
 all:
 	python3 -m pdb -c continue test_gensim.py --method=$(method) --min_count=$(min_count) --num_sents=$(num_sents)
@@ -18,6 +18,8 @@ nnse:
 	python3 -m pdb -c continue test_gensim.py --method=nnse --min_count=$(min_count) --num_sents=$(num_sents)
 svd:
 	python3 -m pdb -c continue test_gensim.py --method=svd --min_count=$(min_count) --num_sents=$(num_sents)
+random:
+	python3 -m pdb -c continue test_gensim.py --method=random --min_count=$(min_count) --num_sents=$(num_sents)
 sktensor:
 	python3 -m pdb -c continue test_gensim.py --method=sktensor --min_count=$(min_count) --num_sents=$(num_sents)
 restore_ckpt:
