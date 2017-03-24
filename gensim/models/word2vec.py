@@ -758,7 +758,7 @@ class Word2Vec(utils.SaveLoad):
         return sum(len(sentence) for sentence in job)
 
     def train(self, sentences, batches=None, total_words=None, word_count=0,
-              total_examples=None, queue_factor=2, report_delay=1.0):
+              total_examples=None, queue_factor=2, report_delay=1.0, gpu=True):
         """
         Update the model's neural weights from a sequence of sentences (can be a once-only generator stream).
         For Word2Vec, each sentence must be a list of unicode strings. (Subclasses may accept other examples.)
@@ -793,7 +793,7 @@ class Word2Vec(utils.SaveLoad):
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='CBOW',
-                    gpu=True,
+                    gpu=gpu,
                 )
             elif self.cnn:
                 embedding_model = WordEmbedding(

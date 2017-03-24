@@ -33,21 +33,6 @@ class TensorEmbedding(object):
             raise ValueError('As of right now, ndims can be at most 3')
 
         self.vocab_len = len(self.model.vocab)
-        # t-th batch tensor
-        # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
-        config = tf.ConfigProto(
-            allow_soft_placement=True,
-        )
-        self.sess = tf.Session(config=config)
-        with self.sess.as_default():
-            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
-            self.decomp_method = CPDecomp(
-                shape=[self.vocab_len] * self.ndims,
-                sess=self.sess,
-                rank=embedding_dim,
-                ndims=self.ndims,
-                optimizer_type=self.optimizer_type,
-            )
 
     def write_embedding_to_file(self, fname='vectors.txt'):
         vectors = {}
@@ -338,7 +323,6 @@ class PMIGatherer(object):
             positive_args = np.argwhere(values > 0.0)
             indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])
             values = np.squeeze(values[positive_args])
-            #print('{} nonzero pmi\'s out of {} total (=> {} total entries)'.format(len(values), num_total_vals, 6*len(values)))
         if neg_sample_percent > 0.0:
             '''
             Add random values with zero PMI so it doesn't just predict everything to have (mean) PMI
@@ -361,12 +345,10 @@ class PMIGatherer(object):
             # self.debug so we can turn it off (in pdb) whenever we want
             t = time.time()
             import heapq
-            print('Getting top 200 PMIs...')
             top_k = heapq.nlargest(200, zip(values,indices), key=lambda x: x[0])
             top_k_pairs = sorted(list(set([(tuple(ix), val) for (val,ix) in top_k])), key=lambda x: x[1])
             top_k_pairs_words = [(tuple(self.model.index2word[x[i]] for i in range(self.n)), val) for (x, val) in top_k_pairs]
             print(top_k_pairs_words)
-            print('n largest took {} sec'.format(time.time() - t))
             #import pdb; pdb.set_trace()
             pass
         if not symmetric:

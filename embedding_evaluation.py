@@ -13,7 +13,7 @@ def write_embedding_to_file(embedding, model, fname='vectors.txt'):
     for word in model.vocab:
         word_vocab = model.vocab[word]
         word_vect = embedding[word_vocab.index]
-        vect_list = ['{:.3f}'.format(x) for x in word_vect]
+        vect_list = ['{:.7f}'.format(x) for x in word_vect]
         vectors[word] = ' '.join(vect_list)
     count = 0
     with open(fname, 'w') as f:
@@ -49,7 +49,7 @@ def evaluate(embedding, method, model):
         positive=['king'],
         topn=5,
     )))
-    print('done evaluating.')
+    print('done evaluating {}.'.format(method))
 
 def evaluate_vectors_from_path(vector_path, results_path):
     os.system('python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(vector_path, results_path))
@@ -112,6 +112,8 @@ class EmbeddingTaskEvaluator(object):
         score = LR.score(X_test, y_test)
         if print_score:
             print('Score: {}'.format(score))
+        with open('results/word_class_{}.txt'.format(self.method), 'w') as f:
+            print('Score: {}'.format(score), file=f)
         return score
 
     def get_analogy_data(self, split_type='train'):
@@ -391,6 +393,9 @@ class EmbeddingTaskEvaluator(object):
         if verbose:
             print("Scoring...")
         opp, accuracy = score_embedding(embedding, dataset)
+        with open('results/outlier_det_{}.txt'.format(self.method), 'w') as f:
+            print('OPP: {}'.format(opp), file=f)
+            print('Accuracy: {}'.format(accuracy), file=f)
         return opp, accuracy
 
 

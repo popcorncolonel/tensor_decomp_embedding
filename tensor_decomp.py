@@ -123,10 +123,7 @@ class CPDecomp(object):
             """
             predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.V, x[1]) * tf.gather(self.W, x[2]))
             predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=False)  # elementwise ops are slow as heck. and yet storing all the vects in memory is infeasible. Could try fitting the whole thing in memory just on GPU 1 or something, but it might just not fit. 3*N*R = too much? at what point is it too much?
-            if self.loss_type == 'squared':
-                errs = tf.squared_difference(predicted_vals, X.values)
-            elif self.loss_type == 'poisson':  # minimize the KL Divergence between predicted (M) and actual (X^t)
-                errs = predicted_vals - X.values * tf.log(predicted_vals)
+            errs = tf.squared_difference(predicted_vals, X.values)
             return tf.reduce_mean(errs)
 
         def reg(U,V,W):
@@ -361,7 +358,7 @@ def test_decomp():
 
 
 class SymmetricCPDecomp(object):
-    def __init__(self, dim, rank, sess, loss_type='squared', ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True):
+    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True, loss_type='squared',):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
         `optimizer_type` must be in ('adam', 'sgd', '2sgd')

@@ -27,11 +27,12 @@ stopwords = stopwords.union(grammar_stopwords)
 
 
 class GensimSandbox(object):
-    def __init__(self, method, embedding_dim, num_sents, min_count):
+    def __init__(self, method, embedding_dim, num_sents, min_count, gpu=True):
         self.method = method
         self.embedding_dim = int(embedding_dim)
         self.min_count = int(min_count)
         self.num_sents = int(num_sents)
+        self.gpu = gpu
         if '--buildvocab' in sys.argv:
             self.buildvocab = True
         else:
@@ -142,7 +143,7 @@ class GensimSandbox(object):
     def train_gensim_embedding(self):
         print('training...')
         batches = batch_generator(self.model, self.sentences_generator(), batch_size=128)
-        self.model.train(sentences=None, batches=batches)
+        self.model.train(sentences=None, batches=batches, gpu=self.gpu)
         print('finished training!')
 
         print("most similar to king - man + woman: {}".format(self.model.most_similar(
@@ -182,15 +183,10 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_online_cp_decomp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
+    def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool, loss_type: str):
         gatherer = self.get_pmi_gatherer(ndims)
 
-        def sparse_tensor_batches(n_repetitions=1, debug=True, symmetric=symmetric):
-            (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=debug, symmetric=symmetric)
-            for i in range(n_repetitions):
-                yield (indices, values)
-
-        def sparse_tensor_batches(batch_size=2000, symmetric=symmetric):
+        def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
             for batch in batches:
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
@@ -200,7 +196,7 @@ class GensimSandbox(object):
                     symmetric=symmetric,
                     log_info=False,
                     limit_large_vals=False,
-                    neg_sample_percent=.05,
+                    neg_sample_percent=.5,
                     pmi=True,
                 )
                 yield sparse_ppmi_tensor_pair
@@ -213,11 +209,7 @@ class GensimSandbox(object):
             if symmetric:
                 n_entries = len(self.model.vocab) * self.embedding_dim
                 reg_param = 1 / n_entries
-                #reg_param = 0
-                gpu = True
-                if ndims == 2:
-                    reg_param = 0
-                    gpu = False
+                reg_param = 1e-5
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
                     dim=len(self.model.vocab),
@@ -227,7 +219,8 @@ class GensimSandbox(object):
                     optimizer_type='adam',
                     reg_param=reg_param,
                     nonneg=nonneg,
-                    gpu=gpu,
+                    gpu=self.gpu,
+                    loss_type='poisson',
                 )
             else:
                 decomp_method = CPDecomp(
@@ -240,7 +233,7 @@ class GensimSandbox(object):
         print('Starting CP Decomp training')
         decomp_method.train(sparse_tensor_batches(), checkpoint_every=1000)
 
-        (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=symmetric)
+        (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric)
         U = decomp_method.U.eval(self.sess)
         if not symmetric: 
             V = decomp_method.V.eval(self.sess)
@@ -263,7 +256,6 @@ class GensimSandbox(object):
             if nonneg:
                 sparse_embedding = U.clip(min=0.0)
                 self.embedding = sparse_embedding
-                print(self.embedding[0])
                 self.to_save['sparse_embedding'] = sparse_embedding
                 self.to_save['full_embedding'] = U
             else:
@@ -272,23 +264,28 @@ class GensimSandbox(object):
             def mse(embedding_mat):
                 total_err = 0.0
                 for ix, val in zip(indices, values):
-                    prod = embedding_mat[ix[0]]
+                    prod = embedding_mat[ix[0]].copy()
                     for i in range(1, ndims):
                         prod *= embedding_mat[ix[i]]
                     pred_val = prod.sum()
                     total_err += (pred_val - val) ** 2
                 return total_err / len(indices)
 
-            print(self.embedding[0])
-            import pdb; pdb.set_trace()
             err = mse(self.embedding)
-            print("RMSE: {}".format(np.sqrt(err)))
+            print("RMSE: {:.3f}".format(np.sqrt(err)))
         #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
-        self.evaluate_embedding()
         self.to_save['indices'] = indices
         self.to_save['values'] = values
-        import pdb; pdb.set_trace()
-        pass
+        if nonneg:
+            temp_method = self.method
+            # evaluate and save embedding with negativity
+            self.method += '_but_neg'
+            self.embedding = U
+            self.evaluate_embedding()
+            self.save_metadata()
+            # reset to default
+            self.method = temp_method
+            self.embedding = U.clip(min=0.)
 
     def train_random_embedding(self):
         self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - .5) * 2
@@ -438,8 +435,18 @@ class GensimSandbox(object):
             f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
             f.write('Elapsed training time: {}\n'.format(time.time() - self.start_time))
         write_embedding_to_file(self.embedding, self.model, parent_dir + '/vectors.txt')
-        shutil.copyfile('/home/eric/code/gensim/results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
-        shutil.copyfile('/home/eric/code/gensim/results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
+        try:
+            shutil.copyfile('/home/eric/code/gensim/results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
+            shutil.copyfile('/home/eric/code/gensim/results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
+        except Exception as e:
+            print('caught exception while trying to copy results: {}'.format(e))
+            import pdb; pdb.set_trace()
+        try:
+            shutil.copyfile('/home/eric/code/gensim/results/outlier_det_{}.txt'.format(self.method), parent_dir + '/results_outlier_det.txt')
+            shutil.copyfile('/home/eric/code/gensim/results/word_class_{}.txt'.format(self.method), parent_dir + '/results_word_class.txt')
+        except Exception as e:
+            print('caught exception while trying to copy results: {}'.format(e))
+            import pdb; pdb.set_trace()
         with open(parent_dir + '/embedding.pkl', 'wb') as f:
             dill.dump(self.embedding, f)
         try:
@@ -468,15 +475,30 @@ class GensimSandbox(object):
         if experiment != '':
             experiment = '_' + experiment.replace(' ', '_')
             print("experiment name: {}".format(experiment[1:]))
-        if self.method in ['cp_decomp']:
+
+        if self.method in ['random']:
+            self.train_random_embedding()
+        elif self.method in ['cp']:
             self.method += experiment
-            self.train_online_cp_decomp_embedding(ndims=3, symmetric=True, nonneg=False)
-        elif self.method in ['cp_decomp_nonneg']:
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, loss_type='squared')
+        elif self.method in ['cp_poisson']:
             self.method += experiment
-            self.train_online_cp_decomp_embedding(ndims=3, symmetric=True, nonneg=True)
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, loss_type='poisson')
+        elif self.method in ['cp_nonneg']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, loss_type='squared')
+        elif self.method in ['cp_nonneg_poisson']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, loss_type='poisson')
+        elif self.method in ['cp_nonneg_4d']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True, loss_type='squared')
+        elif self.method in ['cp_4d']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=False, loss_type='squared')
         elif self.method in ['nnse']:
             self.method += experiment
-            self.train_online_cp_decomp_embedding(ndims=2, symmetric=True, nonneg=True)
+            self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True, loss_type='squared')
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
             self.method += experiment
             self.train_gensim_embedding()
@@ -486,9 +508,6 @@ class GensimSandbox(object):
         elif self.method in ['matlab']:
             self.method += experiment
             self.train_save_sp_tensor()
-        elif self.method in ['random']:
-            self.method += experiment
-            self.train_random_embedding()
         elif self.method in ['loadmatlab']:
             self.method += experiment
             self.loadmatlab()
@@ -499,11 +518,13 @@ class GensimSandbox(object):
             raise ValueError('undefined method {}'.format(self.method))
         self.evaluate_embedding()
         self.save_metadata()
+        print('All done training and evaluating {}!'.format(self.method))
 
 def main():
-    method = 'cp_decomp'
+    method = None
     num_sents = None
     min_count = None
+    embedding_dim = None
     for arg in sys.argv:
         if arg.startswith('--method='):
             method = arg.split('--method=')[1]
@@ -511,6 +532,9 @@ def main():
             num_sents = float(arg.split('--num_sents=')[1])
         if arg.startswith('--min_count='):
             min_count = float(arg.split('--min_count=')[1])
+        if arg.startswith('--embedding_dim='):
+            embedding_dim = int(arg.split('--embedding_dim=')[1])
+    assert all([method, num_sents, min_count, embedding_dim]), 'Please supply all necessary parameters'
 
     def input_with_timeout(prompt, timeout):
         sys.stdout.write(prompt)
@@ -528,7 +552,7 @@ def main():
     sandbox = GensimSandbox(
         method=method,
         num_sents=num_sents,
-        embedding_dim=300,
+        embedding_dim=embedding_dim,
         min_count=min_count,
     )
     sandbox.train(experiment=experiment)
