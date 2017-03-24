@@ -201,15 +201,24 @@ class GensimSandbox(object):
                 )
                 yield sparse_ppmi_tensor_pair
 
+        (indices, values) = None, None  # to be filled in later
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
             if symmetric:
+                print('getting full PMI tensor...')
+                (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric)
+                mean_value = np.mean(values)
+                print('mean tensor value: {}'.format(mean_value))
+
                 n_entries = len(self.model.vocab) * self.embedding_dim
-                reg_param = 1 / n_entries
-                reg_param = 1e-5
+                # reg_param should be set so that initial reg. loss is about 1.0
+                # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
+                mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
+                reg_param = mean / 100.  # ...heuristic
+                reg_param = 0.0
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
                     dim=len(self.model.vocab),
@@ -220,7 +229,8 @@ class GensimSandbox(object):
                     reg_param=reg_param,
                     nonneg=nonneg,
                     gpu=self.gpu,
-                    loss_type='poisson',
+                    loss_type=loss_type,
+                    mean_value=mean_value,
                 )
             else:
                 decomp_method = CPDecomp(
@@ -233,7 +243,6 @@ class GensimSandbox(object):
         print('Starting CP Decomp training')
         decomp_method.train(sparse_tensor_batches(), checkpoint_every=1000)
 
-        (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric)
         U = decomp_method.U.eval(self.sess)
         if not symmetric: 
             V = decomp_method.V.eval(self.sess)
@@ -256,8 +265,6 @@ class GensimSandbox(object):
             if nonneg:
                 sparse_embedding = U.clip(min=0.0)
                 self.embedding = sparse_embedding
-                self.to_save['sparse_embedding'] = sparse_embedding
-                self.to_save['full_embedding'] = U
             else:
                 self.embedding = U.copy()
 
@@ -276,16 +283,6 @@ class GensimSandbox(object):
         #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
         self.to_save['indices'] = indices
         self.to_save['values'] = values
-        if nonneg:
-            temp_method = self.method
-            # evaluate and save embedding with negativity
-            self.method += '_but_neg'
-            self.embedding = U
-            self.evaluate_embedding()
-            self.save_metadata()
-            # reset to default
-            self.method = temp_method
-            self.embedding = U.clip(min=0.)
 
     def train_random_embedding(self):
         self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - .5) * 2
@@ -298,6 +295,7 @@ class GensimSandbox(object):
             print('creating sparse count tensor...')
         indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=False, pmi=pmi)
         scipy.io.savemat('sp_tensor_{}_{}.mat'.format(self.num_sents, self.min_count), {'indices': indices, 'values': values})
+        print('saved. exiting.')
         sys.exit()
 
         from pymatbridge import Matlab
@@ -478,24 +476,21 @@ class GensimSandbox(object):
 
         if self.method in ['random']:
             self.train_random_embedding()
-        elif self.method in ['cp']:
+        elif self.method in ['cp']:  # Basic CP Decomp (from matlab)
+            self.method += experiment
+            self.loadmatlab()
+        elif self.method in ['cp-s']:  # Symmetric CP Decomp experiments
             self.method += experiment
             self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, loss_type='squared')
-        elif self.method in ['cp_poisson']:
-            self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, loss_type='poisson')
-        elif self.method in ['cp_nonneg']:
+        elif self.method in ['cp-sn']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, loss_type='squared')
-        elif self.method in ['cp_nonneg_poisson']:
-            self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, loss_type='poisson')
-        elif self.method in ['cp_nonneg_4d']:
-            self.method += experiment
-            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True, loss_type='squared')
-        elif self.method in ['cp_4d']:
+        elif self.method in ['cp-s_4d']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=False, loss_type='squared')
+        elif self.method in ['cp-sn_4d']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True, loss_type='squared')
         elif self.method in ['nnse']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True, loss_type='squared')
@@ -508,9 +503,6 @@ class GensimSandbox(object):
         elif self.method in ['matlab']:
             self.method += experiment
             self.train_save_sp_tensor()
-        elif self.method in ['loadmatlab']:
-            self.method += experiment
-            self.loadmatlab()
         elif self.method in ['restore_ckpt']:
             self.method += experiment
             self.restore_from_ckpt()

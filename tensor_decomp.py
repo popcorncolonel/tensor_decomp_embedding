@@ -358,7 +358,7 @@ def test_decomp():
 
 
 class SymmetricCPDecomp(object):
-    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True, loss_type='squared',):
+    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True, loss_type='squared', mean_value=None):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
         `optimizer_type` must be in ('adam', 'sgd', '2sgd')
@@ -376,6 +376,7 @@ class SymmetricCPDecomp(object):
         assert loss_type in ['squared', 'poisson']
         self.reg_param = reg_param
         self.gpu = gpu
+        self.mean_value = mean_value
 
         with tf.device('/{}:0'.format('gpu' if self.gpu else 'cpu')):
             # t-th batch tensor
@@ -384,11 +385,15 @@ class SymmetricCPDecomp(object):
             shape_sparse = np.array(self.shape, dtype=np.int64)
             self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
-            mu = 10.0
+            if self.mean_value is None:
+                mu = 10.0
+            else:
+                mu = self.mean_value
+            mean = (1. / self.rank) * (mu ** (1/self.ndims))
             self.U = tf.Variable(tf.random_normal(
                 shape=[dim, self.rank],
-                mean=(1. / self.rank) * (mu ** (1/self.ndims)),
-                stddev=.1,
+                mean=mean,
+                stddev=mean / 5,
             ), name="U")
             if self.nonneg:
                 self.sparse_U = tf.nn.relu(self.U, name='Sparse_U')
@@ -492,10 +497,10 @@ class SymmetricCPDecomp(object):
 
         U = self.U
         if self.nonneg:
-            U = self.sparse_U  #TODO: MSE is for some reason different than the loss. debug some stuff, make some predictions on batches after a few hundred training steps, to make sure we're calculating loss correctly. 
+            U = self.sparse_U
         self.L = L(self.X_t, U)
         if reg_param > 0.0:
-            self.reg = reg(self.U) 
+            self.reg = reg(U) 
         else:
             self.reg = tf.constant(0.0)
         self.loss = self.L + self.reg

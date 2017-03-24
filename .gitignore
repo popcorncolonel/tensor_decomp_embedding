@@ -71,3 +71,7 @@ data
 *.html
 *.inv
 *.js
+*.txt
+*wikimodel*
+*gath*
+*.mat

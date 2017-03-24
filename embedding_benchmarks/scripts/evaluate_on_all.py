@@ -18,6 +18,7 @@
 from optparse import OptionParser
 import logging
 import os
+import numpy as np
 from pandas import ExcelWriter
 from web.embeddings import fetch_GloVe, load_embedding
 from web.datasets.utils import _get_dataset_dir
@@ -81,6 +82,12 @@ if __name__ == "__main__":
                            load_kwargs=load_kwargs)
 
     out_fname = options.output if options.output else "results.txt"
+    # Loop through w to, set the whole vector to .000001")
+    for i, vect in enumerate(w.vectors):
+        if np.nan in vect:
+            w.vectors[i] = np.zeros(len(w.vectors[i]))  # remove NANs
+        if np.all(vect == 0.0):
+            w.vectors[i][0] += .000001  # remove chance of dividing by zero
 
     results = evaluate_on_all(w)
 
