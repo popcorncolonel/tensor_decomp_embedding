@@ -4,8 +4,10 @@ import os
 import sklearn
 import sys
 import tensorflow as tf
+import time
 
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 
 
 def write_embedding_to_file(embedding, model, fname='vectors.txt'):
@@ -63,8 +65,6 @@ class EmbeddingTaskEvaluator(object):
         self.embedding_dict = {}
         if fname is None:
             fname = 'vectors_{}.txt'.format(method)
-        #fname = 'vectors_random.txt'
-        #fname = 'runs/loadmatlab/30000000_5000_100/vectors.txt'
         self.fname = fname
         with open(fname, 'r') as f:
             for i, line in enumerate(list(f)):
@@ -111,7 +111,7 @@ class EmbeddingTaskEvaluator(object):
         LR.fit(X, y)
         score = LR.score(X_test, y_test)
         if print_score:
-            print('Score: {}'.format(score))
+            print('Word classification score: {}'.format(score))
         with open('results/word_class_{}.txt'.format(self.method), 'w') as f:
             print('Score: {}'.format(score), file=f)
         return score
@@ -297,7 +297,6 @@ class EmbeddingTaskEvaluator(object):
         else:
             raise ValueError('Unrecognized split type {}'.format(split_type))
         from nltk import word_tokenize
-        print('transforming data...')
         tokenized_data = [word_tokenize(sent) for sent in data.data]
         X_data = [np.array([self.embedding_dict[w.lower()] for w in sent if w.lower() in self.embedding_dict]) for sent in tokenized_data]
         y_data = data.target
@@ -361,7 +360,29 @@ class EmbeddingTaskEvaluator(object):
         X_train, y_train = self.get_sent_class_data('train')
         self._build_sent_class_CNN(X_train, y_train)
 
-    def outlier_detection(self, verbose=True):
+    def _build_sentiment_class_NN(self, X_train, y_train):
+        pass
+
+    def sentiment_classification_tasks(self, print_score=False):
+        X, y = self.get_sent_class_data('train')
+        X_test, y_test = self.get_sent_class_data('test')
+        X = np.array([x.sum(axis=0) for x in X])
+        X_test = np.array([x.sum(axis=0) for x in X_test])
+
+        # TODO: try LR
+        #classifier = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(self.embedding_dim // 2, self.embedding_dim // 4), random_state=42)
+        classifier = LogisticRegression()
+        t = time.time()
+        classifier.fit(X, y)
+        print('fitting classifier took {:.3f}s'.format(time.time() - t))
+        score = classifier.score(X_test, y_test)
+        if print_score:
+            print('Sentiment classification score: {}'.format(score))
+        with open('results/sentiment_class_{}.txt'.format(self.method), 'w') as f:
+            print('Score: {}'.format(score), file=f)
+        return score
+
+    def outlier_detection(self, verbose=True, n=3):
         from wikisem500.src.evaluator import Evaluator
         from wikisem500.src.embeddings import WrappedEmbedding
         from wikisem500.src.outlier_test_group import TestGroup
@@ -374,7 +395,7 @@ class EmbeddingTaskEvaluator(object):
 
         def score_embedding(embedding, groups):
             evaluator = Evaluator(groups)
-            evaluator.evaluate(embedding)
+            evaluator.evaluate(embedding, n=n)
             if verbose:
                 print("   RESULTS")
                 print("==============")
@@ -400,10 +421,11 @@ class EmbeddingTaskEvaluator(object):
 
 
 if __name__ == '__main__':
-    method = 'cp_decomp_nonneg'
+    method = 'cp-s'
     evaluator = EmbeddingTaskEvaluator(method)
     #evaluator.word_classification_tasks()
     #evaluator.analogy_tasks()
     #evaluator.sent_classification_tasks()
-    score = evaluator.outlier_detection()
+    #score = evaluator.outlier_detection()
+    evaluator.sentiment_classification_tasks()
 

@@ -358,10 +358,9 @@ def test_decomp():
 
 
 class SymmetricCPDecomp(object):
-    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10, nonneg=True, gpu=True, loss_type='squared', mean_value=None):
+    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='adam', reg_param=1e-10, nonneg=True, gpu=True, mean_value=None):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
-        `optimizer_type` must be in ('adam', 'sgd', '2sgd')
         since X is supersymmetric, `dim` is the length of each dimension
         
         Approximates a supersymmetric tensor whose approximations are repeatedly fed in batch format (indices always in sorted order) to `self.train`
@@ -372,8 +371,6 @@ class SymmetricCPDecomp(object):
         self.ndims = ndims
         self.sess = sess
         self.nonneg = nonneg
-        self.loss_type = loss_type
-        assert loss_type in ['squared', 'poisson']
         self.reg_param = reg_param
         self.gpu = gpu
         self.mean_value = mean_value
@@ -418,11 +415,11 @@ class SymmetricCPDecomp(object):
             print("{}".format(rmse_val), file=self.results_file)
         print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
        
-    def train_step(self, approx_indices, approx_values, print_every=10, validate_indices=False):
+    def train_step(self, approx_tensor, print_every=10, validate_indices=False):
+        approx_indices, approx_values = approx_tensor
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
             self.avg_time = 0.0
-            self.total_recordings = 0
         feed_dict = {
             self.indices: approx_indices,
             self.values: approx_values,
@@ -459,9 +456,6 @@ class SymmetricCPDecomp(object):
             batch_time = (time.time() - self.prev_time) / print_every
             print("Err at step {}: {:.3f}; Reg loss: {:.3f} (lambda = {:.1E}) (Avg batch time: {:.3f})".format(int(step), err, reg, self.reg_param, batch_time))
             self.prev_time = time.time()
-            #self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
-            #print("avg time (per batch, overall): {}".format(self.avg_time))
-            self.total_recordings += 1
         
     def create_loss_fn(self, reg_param):
         """
@@ -514,20 +508,14 @@ class SymmetricCPDecomp(object):
         '''
         
     def get_train_ops(self):
-        if self.optimizer_type == 'adam':
-            train_ops = [self.get_train_op_adam()]
-        elif self.optimizer_type == 'sgd':
-            train_ops = [self.get_train_op_sgd()]
+        train_ops = [self.get_train_op_adam()]
         inc_t = tf.assign(self.global_step, self.global_step+1)
         return [*train_ops, inc_t]
 
     def get_train_op_adam(self):
         return self.optimizer.minimize(self.loss)
 
-    def get_train_op_sgd(self):
-        return self.optimizer.minimize(self.loss)
-
-    def train(self, expected_tensors, true_X=None, evaluate_every=100, results_file=None, write_loss=True, checkpoint_every=None):
+    def train(self, expected_tensors, results_file=None, write_loss=True, checkpoint_every=None):
         '''
         Assumes `expected_tensors` is a generator of sparse tensor values. 
         '''
@@ -537,10 +525,7 @@ class SymmetricCPDecomp(object):
         with tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
             print('setting up variables...')
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
-            if self.optimizer_type == 'adam':
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=.001)
-            elif self.optimizer_type == 'sgd':
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=.01)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=.001)
 
             self.train_ops = self.get_train_ops()
 
@@ -567,27 +552,154 @@ class SymmetricCPDecomp(object):
         self.sess.run(tf.global_variables_initializer())
         with self.sess.as_default():
             print('looping through batches...')
-            for expected_indices, expected_values in expected_tensors:
-                if self.batch_num % evaluate_every == 0 and true_X is not None:
-                    self.evaluate(true_X)
+            for expected_tensor in expected_tensors:
                 try:
-                    self.train_step(expected_indices, expected_values)
+                    self.train_step(expected_tensor)
                 except tf.errors.InvalidArgumentError as e:
                     self.batch_num -= 1
                     num_invalid_arg_exceptions += 1
                     print("INVALID ARG EXCEPTION: {}. Accidentally noninvertible matrix? There have been {} of these.".format(e, num_invalid_arg_exceptions))
                     import pdb; pdb.set_trace()
                 self.batch_num += 1
-            try:
-                path = self.saver.save(self.sess, checkpoint_dir, global_step=tf.train.global_step(self.sess, self.global_step))
-                print('Saved FINAL model checkpoint to {}'.format(path))
-            except Exception as e:
-                print(e)
-                print("Caught exception trying to checkpoint the final model. You're welcome ;)")
-                import pdb; pdb.set_trace()
-                pass
+            if self.checkpoint_every is not None:
+                try:
+                    path = self.saver.save(self.sess, checkpoint_dir, global_step=tf.train.global_step(self.sess, self.global_step))
+                    print('Saved FINAL model checkpoint to {}'.format(path))
+                except Exception as e:
+                    print(e)
+                    print("Caught exception trying to checkpoint the final model. You're welcome ;)")
+                    import pdb; pdb.set_trace()
+                    pass
         if self.write_loss:
             self.train_summary_writer.close()
+
+
+class JointSymmetricCPDecomp(SymmetricCPDecomp):
+    def __init__(self, size, rank, sess, dimlist=[2,3], reg_param=1e-10, nonneg=True, gpu=True):
+        '''
+        `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
+        since X is supersymmetric, `size` is the length of each dimension
+        
+        Approximates a supersymmetric tensor whose approximations are repeatedly fed in batch format (indices always in sorted order) to `self.train`
+        '''
+        self.dimlist = dimlist
+        self.rank = rank
+        self.sess = sess
+        self.nonneg = nonneg
+        self.reg_param = reg_param
+        self.gpu = gpu
+
+        self.indices = []
+        self.values = []
+        self.X_ts = []
+        with tf.device('/{}:0'.format('gpu' if self.gpu else 'cpu')):
+            # t-th batch tensor
+            for dim in dimlist:
+                indices = tf.placeholder(tf.int64, shape=[None, dim], name='X_t_indices_{}'.format(dim))
+                values = tf.placeholder(tf.float32, shape=[None], name='X_t_values_{}'.format(dim))
+                self.indices.append(indices)
+                self.values.append(values)
+                shape_sparse = np.array([size] * dim, dtype=np.int64)
+                self.X_ts.append(tf.SparseTensorValue(indices, values, shape=shape_sparse))
+            # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
+            mu = 10.0
+            mean = (1. / self.rank) * (mu ** (1/3))
+            self.U = tf.Variable(tf.random_normal(
+                shape=[size, self.rank],
+                mean=mean,
+                stddev=mean / 5,
+            ), name="U")
+            if self.nonneg:
+                self.sparse_U = tf.nn.relu(self.U, name='Sparse_U')
+        self.create_loss_fn(reg_param=reg_param)
+
+    def train_step(self, approx_tensor, print_every=10):
+        approx_indices, approx_values = approx_tensor
+        if not hasattr(self, 'prev_time'):
+            self.prev_time = time.time()
+            self.avg_time = 0.0
+            self.total_recordings = 0
+
+        feed_dict = {}
+        for ixes, vals, i in zip(approx_indices, approx_values, range(len(self.dimlist))):
+            feed_dict[self.indices[i]] = ixes
+            feed_dict[self.values[i]] = vals
+        _, loss_summary, step = self.sess.run(
+            [
+                self.train_ops,
+                self.loss_summary,
+                self.global_step,
+            ],
+            feed_dict=feed_dict,
+        )
+        if self.checkpoint_every is not None:
+            if step % self.checkpoint_every == 0 and step > 0:
+                t = time.time()
+                print('Saving checkpoint at step {}...'.format(step))
+                path = self.saver.save(self.sess, self.checkpoint_prefix, global_step=self.global_step)
+                print('Saved model checkpoint to {} (it took {} secs)'.format(path, time.time() - t))
+
+        if step % print_every == 0:
+            t = time.time()
+            errs, reg = self.sess.run(
+                [
+                    self.Ls,
+                    self.reg,
+                ],
+                feed_dict=feed_dict,
+            )
+            batch_time = (time.time() - self.prev_time) / print_every
+            # string formatting to print the errors for each dimension
+            errstring = '; '.join(['{}d: {:.2f}'.format(dim, err) for dim, err in zip(self.dimlist, errs)])
+            print("{}: Errs: {}; Reg loss: {:.2f} (lambda={:.1E}) (Avg time: {:.2f})".format(int(step), errstring, reg, self.reg_param, batch_time))
+            self.prev_time = time.time()
+            self.total_recordings += 1
+        
+    def create_loss_fn(self, reg_param):
+        """
+        L(X; U) = .5 sum_{i,j,k where X_ijk =/= 0} (X_ijk - sum_{r=1}^{R} U_ir U_jr U_kr)^2
+        L_{rho} = L(X; U) + rho * (||U||^2) where ||.|| represents some norm (L2, L1, Frobenius)
+        """
+        def L(X, U, dim):
+            """
+            X is a sparse tensor. U is dense. 
+            """
+            indices = tf.transpose(X.indices)  # of shape (N,3) - represents the indices of all values (in the same order as X.values)
+            with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
+                X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
+
+                prod_vects = tf.gather(U, tf.gather(indices, 0))
+                for i in range(1, dim):
+                    i_indices = tf.gather(indices, i)  # of shape (N,) - represents all the indices to get from the U matrix
+                    i_vects = tf.gather(U, i_indices)
+                    prod_vects *= i_vects
+                predicted_X_ijks = tf.reduce_sum(prod_vects, axis=1)
+               
+                errors = tf.squared_difference(X_ijks, predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
+                mean_loss = tf.reduce_mean(errors)  # average loss per entry in X - scalar!
+                return mean_loss
+
+        def reg(U):
+            with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
+                if self.nonneg:
+                    return reg_param * tf.reduce_sum(tf.abs(U))
+                else:
+                    # NOTE: l2_loss already squares the norms. So we don't need to square them.
+                    return .5  * reg_param * tf.nn.l2_loss(U, name="U_L2_norm")
+
+        U = self.U
+        if self.nonneg:
+            U = self.sparse_U
+        if reg_param > 0.0:
+            self.reg = reg(U) 
+        else:
+            self.reg = tf.constant(0.0)
+        self.Ls = []
+        for i, dim in enumerate(self.dimlist):
+            self.Ls.append(L(self.X_ts[i], U, dim))
+        self.L = sum(self.Ls)
+        self.loss = self.L + self.reg
+
 
 def test_symmetric_decomp():
     shape = [30, 30, 30]
@@ -626,7 +738,6 @@ def test_symmetric_decomp():
     )
     sess = tf.Session(config=config)
     with open('results_adam.txt', 'w') as f:
-        # train 2sgd
         decomp_method = SymmetricCPDecomp(
             dim=shape[0],
             sess=sess,
@@ -635,10 +746,52 @@ def test_symmetric_decomp():
             optimizer_type='adam',
             reg_param=0.0,
         )
-        decomp_method.train(sparse_batch_tensor_generator(indices, vals), true_X=None, evaluate_every=2, results_file=f, write_loss=False)
+        decomp_method.train(sparse_batch_tensor_generator(indices, vals), results_file=f, write_loss=False)
+
+
+def test_joint_decomp():
+    shape = [30, 30, 30]
+
+    indices2 = []
+    indices3 = []
+    vals = []
+    print('filling tensor...')
+    for i in range(30):
+        for j in range(i+1, 30):
+            for k in range(j+1, 30):
+                val = np.random.rand()
+                indices2.append(np.array([i,j]))
+                indices3.append(np.array([i,j,k]))
+                vals.append(val)
+    indices2 = np.array(indices2)
+    indices3 = np.array(indices3)
+    vals = np.array(vals)
+
+    def sparse_batch_tensor_generator(indices2, indices3, vals):
+        import random
+        for _ in range(5000):
+            values = vals + np.random.rand(len(vals)) - 0.5
+            #print('{} nonzero vals'.format(len(indices)))
+            yield ([indices2, indices3], [values, values])
+
+    config = tf.ConfigProto(
+        allow_soft_placement=True,
+    )
+    sess = tf.Session(config=config)
+    with open('results_adam.txt', 'w') as f:
+        decomp_method = JointSymmetricCPDecomp(
+            size=30,
+            dimlist=[2,3],
+            sess=sess,
+            rank=100,
+            reg_param=0.000001,
+        )
+        decomp_method.train(sparse_batch_tensor_generator(indices2, indices3, vals), results_file=f, write_loss=False)
+
 
 if __name__ == '__main__':
     print('testing CP decomp...')
     #test_decomp()
-    test_symmetric_decomp()
+    #test_symmetric_decomp()
+    test_joint_decomp()
 

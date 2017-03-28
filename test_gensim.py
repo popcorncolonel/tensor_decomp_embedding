@@ -17,7 +17,7 @@ import tensorflow as tf
 from embedding_evaluation import write_embedding_to_file, evaluate, EmbeddingTaskEvaluator
 from gensim_utils import batch_generator, batch_generator2
 from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
-from tensor_decomp import CPDecomp, SymmetricCPDecomp
+from tensor_decomp import CPDecomp, SymmetricCPDecomp, JointSymmetricCPDecomp
 from nltk.corpus import stopwords
 
 
@@ -183,7 +183,63 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool, loss_type: str):
+    def train_joint_online_cp_embedding(self, dimlist: list, nonneg: bool):
+        gatherers = [self.get_pmi_gatherer(dim) for dim in dimlist]
+
+        def sparse_tensor_batches(batch_size=1000):
+            batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
+            for batch in batches:
+                pairlist = [
+                    gatherer.create_pmi_tensor(
+                        batch=batch,
+                        positive=True,
+                        debug=False,
+                        symmetric=True,
+                        log_info=False,
+                        limit_large_vals=False,
+                        neg_sample_percent=.0,
+                        pmi=True,
+                    )
+                    for gatherer in gatherers
+                ]
+                yield ([x[0] for x in pairlist], [x[1] for x in pairlist])
+
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+        )
+        self.sess = tf.Session(config=config)
+        with self.sess.as_default():
+            # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
+            mu = 10.
+            mean = (1. / self.embedding_dim) * (mu ** (1./3.))
+            reg_param = mean / 100.  # ...heuristic
+            reg_param = 0
+            print('reg_param: {}'.format(reg_param))
+            decomp_method = JointSymmetricCPDecomp(
+                size=len(self.model.vocab),
+                dimlist=dimlist,
+                rank=self.embedding_dim,
+                sess=self.sess,
+                reg_param=reg_param,
+                nonneg=nonneg,
+                gpu=self.gpu,
+            )
+        print('Starting Joint CP Decomp training')
+        decomp_method.train(sparse_tensor_batches())
+
+        U = decomp_method.U.eval(self.sess)
+        if nonneg:
+            sparse_embedding = U.clip(min=0.0)
+            self.embedding = sparse_embedding
+        else:
+            self.embedding = U.copy()
+        #################
+        self.evaluate_embedding()
+        print('make sure everything isn\'t just zero')
+        import pdb; pdb.set_trace()
+        pass
+
+    def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
         gatherer = self.get_pmi_gatherer(ndims)
 
         def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
@@ -218,7 +274,7 @@ class GensimSandbox(object):
                 # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
                 mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
                 reg_param = mean / 100.  # ...heuristic
-                reg_param = 0.0
+                reg_param = 5e-5
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
                     dim=len(self.model.vocab),
@@ -229,7 +285,6 @@ class GensimSandbox(object):
                     reg_param=reg_param,
                     nonneg=nonneg,
                     gpu=self.gpu,
-                    loss_type=loss_type,
                     mean_value=mean_value,
                 )
             else:
@@ -241,7 +296,7 @@ class GensimSandbox(object):
                     reg_param=0.0,
                 )
         print('Starting CP Decomp training')
-        decomp_method.train(sparse_tensor_batches(), checkpoint_every=1000)
+        decomp_method.train(sparse_tensor_batches())
 
         U = decomp_method.U.eval(self.sess)
         if not symmetric: 
@@ -280,6 +335,7 @@ class GensimSandbox(object):
 
             err = mse(self.embedding)
             print("RMSE: {:.3f}".format(np.sqrt(err)))
+            self.to_save['RMSE'] = np.sqrt(err)
         #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
         self.to_save['indices'] = indices
         self.to_save['values'] = values
@@ -409,6 +465,7 @@ class GensimSandbox(object):
         evaluate(self.embedding, self.method, self.model)
         evaluator = EmbeddingTaskEvaluator(self.method)
         evaluator.word_classification_tasks(print_score=True)
+        evaluator.sentiment_classification_tasks(print_score=True)
         evaluator.outlier_detection()
         #evaluator.analogy_tasks()
         #evaluator.sent_classification_tasks()
@@ -481,19 +538,25 @@ class GensimSandbox(object):
             self.loadmatlab()
         elif self.method in ['cp-s']:  # Symmetric CP Decomp experiments
             self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, loss_type='squared')
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False)
         elif self.method in ['cp-sn']:
             self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, loss_type='squared')
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True)
         elif self.method in ['cp-s_4d']:
             self.method += experiment
-            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=False, loss_type='squared')
+            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=False)
         elif self.method in ['cp-sn_4d']:
             self.method += experiment
-            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True, loss_type='squared')
+            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True)
+        elif self.method in ['jcp-s']:  # Joint Symmetric CP Decomp experiments
+            self.method += experiment
+            self.train_joint_online_cp_embedding(dimlist=[2,3], nonneg=False)
+        elif self.method in ['jcp-sn']:
+            self.method += experiment
+            self.train_joint_online_cp_embedding(dimlist=[2,3], nonneg=True)
         elif self.method in ['nnse']:
             self.method += experiment
-            self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True, loss_type='squared')
+            self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True)
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
             self.method += experiment
             self.train_gensim_embedding()

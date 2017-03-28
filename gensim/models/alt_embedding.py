@@ -278,10 +278,9 @@ class WordEmbedding(object):
             ],
             feed_dict=feed_dict
         )
-        time_str = datetime.datetime.now().isoformat()
         self.step = step
         if step % print_every == 0:
-            print("{}: step {}, loss {:g}".format(time_str, step, loss))
+            print("{}: loss {:g}".format(step, loss))
         self.train_summary_writer.add_summary(summaries, step)
 
     def dev_step(self, x_batch, y_batch):
