@@ -122,6 +122,7 @@ class EmbeddingTaskEvaluator(object):
         X = analogy['X']
         y = analogy['y']
         parallel_lists = list(zip(X,y))
+        random.seed(42)
         random.shuffle(parallel_lists)
         X = [x[0] for x in parallel_lists]
         y = [x[1] for x in parallel_lists]
@@ -156,8 +157,7 @@ class EmbeddingTaskEvaluator(object):
             y = sklearn.preprocessing.normalize(y)
         return X, y, word_X, word_y
 
-    def _analogy_train_NN(self, X, y):
-        import tensorflow as tf
+    def _analogy_train_NN(self, X, y, verbose=False):
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
@@ -200,9 +200,10 @@ class EmbeddingTaskEvaluator(object):
 
                 def chunker(seq, size):
                     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-                n_iters = 1
+                n_iters = 3
                 for _ in range(n_iters):
-                    print('running batches...')
+                    if verbose:
+                        print('running batches...')
                     for X_batch, y_batch in zip(chunker(X, 25), chunker(y, 25)):
                         _, loss_val, step = sess.run([train_op, loss, global_step], feed_dict={
                             v1: X_batch[:, 0],
@@ -210,158 +211,87 @@ class EmbeddingTaskEvaluator(object):
                             v3: X_batch[:, 2],
                             v4: y_batch,
                         })
-                        if step % 20 == 0:
-                            print('loss at step {}: {}'.format(step, loss_val))
-        return sess, v1, v2, v3, v4_hat
+                        if verbose:
+                            if step % 20 == 0:
+                                print('loss at step {}: {}'.format(step, loss_val))
+        return sess, W1.eval(sess), W2.eval(sess), W3.eval(sess)
 
-    def analogy_tasks(self):
+    def analogy_tasks(self, verbose=True):
         '''
         Currently not working for any embedding. 
         '''
         X, y, _, _ = self.get_analogy_data('train')
         X_test, y_test, word_X_test, word_y_test = self.get_analogy_data('test')
-        print("{} training words".format(len(X)))
-        print("{} testing words".format(len(X_test)))
-        print('fitting NN...')
-        sess, v1, v2, v3, v4_hat = self._analogy_train_NN(X, y)
+        if verbose:
+            print("{} training words".format(len(X)))
+            print("{} testing words".format(len(X_test)))
+        sess, W1, W2, W3 = self._analogy_train_NN(X, y)
 
+        correct_arith = 0
+        correct_manual = 0
         correct = 0
+        total = 0
         for p, answer, query, correct_word in zip(X_test, y_test, word_X_test, word_y_test):
-            [predicted] = sess.run([v4_hat], feed_dict={
-                v1: np.expand_dims(p[0], 0),
-                v2: np.expand_dims(p[1], 0),
-                v3: np.expand_dims(p[2], 0),
-            })
-            predicted = np.squeeze(predicted)
-
             def get_closest_vocab_word(predicted):
                 best_word = None
                 best_vect = None
                 best_dist = float('-inf')
                 for word, vect in self.embedding_dict.items():
                     if word not in query:
-                        dist = np.dot(vect, predicted)
+                        dist = np.dot(vect, predicted)  # cosine similarity
+                        dist /= (np.linalg.norm(vect) * np.linalg.norm(predicted))
                         if dist > best_dist:
                             best_word = word
                             best_vect = vect
                             best_dist = dist
                 return best_word, best_vect
 
+            predicted = -np.dot(W1, p[0]) + np.dot(W2, p[1]) + np.dot(W3, p[2])
+            predicted /= np.linalg.norm(predicted)
+            predicted = np.squeeze(predicted)
+
             best_word, best_vect = get_closest_vocab_word(predicted)
-            if np.allclose(best_vect, answer):
+            if best_word == correct_word:
                 correct += 1
+            total += 1
 
-            ##########################
-            v1_ = self.embedding_dict[query[0]]
-            v2_ = self.embedding_dict[query[1]]
-            v3_ = self.embedding_dict[query[2]]
-            arithmetic_soln = -v1_ + v2_ + v3_
-            best_word2, best_vect2 = get_closest_vocab_word(predicted)
-            ##########################
-
-            print('query: {}'.format(query))
-            print('predicted word: {}'.format(best_word))
-            print('predicted word (by non-NN): {}'.format(best_word2))
-            print('correct word: {}'.format(correct_word))
-            pass
-        [predicted] = sess.run([v4_hat], feed_dict={
-            v1: X_test[:, 0],
-            v2: X_test[:, 1],
-            v3: X_test[:, 2],
-        })
-        predicted = np.squeeze(predicted)
-        print('getting accuracy...')
-        from embedding_benchmarks.scripts.web.datasets.analogy import fetch_google_analogy
-        for predicted_vect, answer in zip(predicted[:100], y_test[:100]):
-            best_word = None
-            best_vect = None
-            best_dist = float('inf')
-            for word, vect in self.embedding_dict.items():
-                dot_prod = np.dot(vect, predicted_vect)
-                if dot_prod < best_dist:
-                    best_word = word
-                    best_vect = vect
-            if np.allclose(best_vect, answer):
-                correct += 1
-            print('predicted word: {}'.format(best_word))
-        print('accuracy: {}/{}={}%'.format(correct, len(X_test), 100.0*correct / float(len(X_test))))
-        import pdb; pdb.set_trace()
-        pass
+        print('Accuracy: {}'.format(correct / total))
+        return correct / total
 
     def get_sent_class_data(self, split_type='train'):
-        from sklearn.datasets import fetch_20newsgroups
+        pos_Xy = []
+        neg_Xy = []
+        pos_dir = 'evaluation_data/sentiment/pos/'
+        for fname in os.listdir(pos_dir):
+            with open(pos_dir + fname, 'r') as f:
+                contents = [x.strip() for x in f]
+            all_words = ' '.join(contents)
+            pos_Xy.append((all_words, True))
+        neg_dir = 'evaluation_data/sentiment/neg/'
+        for fname in os.listdir(neg_dir):
+            with open(neg_dir + fname, 'r') as f:
+                contents = [x.strip() for x in f]
+            all_words = ' '.join(contents)
+            neg_Xy.append((all_words, False))
+        all_data = pos_Xy + neg_Xy
+        random.seed(42)
+        random.shuffle(all_data)
+
+        split_point = int(.85 * len(all_data))
         if split_type == 'train':
-            data = fetch_20newsgroups(subset='train')
+            data = all_data[:split_point]
         elif split_type == 'test':
-            data = fetch_20newsgroups(subset='test')
+            data = all_data[split_point:]
         else:
             raise ValueError('Unrecognized split type {}'.format(split_type))
-        from nltk import word_tokenize
-        tokenized_data = [word_tokenize(sent) for sent in data.data]
-        X_data = [np.array([self.embedding_dict[w.lower()] for w in sent if w.lower() in self.embedding_dict]) for sent in tokenized_data]
-        y_data = data.target
+        tokenized_X = [x[0].split() for x in data]
+        X_data = [np.array([self.embedding_dict[w] for w in sent if w in self.embedding_dict]) for sent in tokenized_X]
+        y_data = [x[1] for x in data]
         return X_data, y_data
-
-    def _build_sent_class_CNN(self, X_train, y_train):
-        max_sent_len = max([x.shape[0] for x in X_train])
-        config = tf.ConfigProto(
-            allow_soft_placement=True,
-        )
-        sess = tf.Session(config=config)
-        with sess.as_default():
-            with tf.device('/gpu:0'):
-                input_x = tf.placeholder(tf.float32, [None, max_sent_len, self.embedding_dim], name='input_x')
-                input_y = tf.placeholder(tf.int64, [None, 20], name='input_y') # Index of correct category
-
-                filter_sizes = [3,4]
-                num_filters = 10
-
-                pooled_outputs = []
-                num_features_total = 0
-                input_expanded = tf.expand_dims(input_x, -1)  # only one initial feature map
-                for filter_size in filter_sizes:
-                    with tf.name_scope('conv-maxpool-{}'.format(filter_size)):
-                        filter_shape = [filter_size, self.embedding_dim, 1, num_filters]
-                        W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
-                        b = tf.Variable(tf.constant(0.0, shape=[num_filters]), name='b')
-                        conv = tf.nn.conv2d(
-                            input=input_expanded,
-                            filter=W,
-                            strides=[1,1,1,1],
-                            padding='VALID',
-                            use_cudnn_on_gpu=True,
-                            name='conv',
-                        )
-                        h = tf.nn.relu(tf.nn.bias_add(conv, b), name='relu')
-                        stride = 5
-                        pooled = tf.nn.max_pool(
-                            h,
-                            ksize = [1, stride, 1, 1],
-                            strides=[1, stride, 1, 1],
-                            padding='VALID',
-                            name='pooling',
-                        )
-                        # "VALID" equation for output height. See https://www.tensorflow.org/versions/r0.11/api_docs/python/nn.html#convolution
-                        num_features_total += num_filters*int(np.math.ceil(float(int(h._shape[1]) - stride + 1) / float(stride)))
-                        import pdb; pdb.set_trace()
-                        pooled_outputs.append(pooled)
-                # concatenate the pooled outputs into a single tensor (by their dimension 3, which is all the different filter outputs. All others dims will be the same.)
-                # so h_pool is of shape [batch_size, num_features_total, 1, num_filters]
-                h_pool = tf.concat(1, pooled_outputs)
-                # -1 flattens into 1D. So h_pool_flat is of shape [batch_size, num_filters_total].
-                assert num_features_total == h_pool._shape[1] * h_pool._shape[3] == 20
-                h_pool_flat = tf.reshape(h_pool, [-1, num_features_total], name='h_pool_flat')
-                with tf.name_scope('dropout'):
-                    h_drop = tf.nn.dropout(h_pool_flat, 0.5)
-                h = h_drop
-                loss = tf.cross_entropy_with_logits(labels=input_y, logits=h)
 
     def sent_classification_tasks(self):
         X_train, y_train = self.get_sent_class_data('train')
         self._build_sent_class_CNN(X_train, y_train)
-
-    def _build_sentiment_class_NN(self, X_train, y_train):
-        pass
 
     def sentiment_classification_tasks(self, print_score=False):
         X, y = self.get_sent_class_data('train')
@@ -369,12 +299,9 @@ class EmbeddingTaskEvaluator(object):
         X = np.array([x.sum(axis=0) for x in X])
         X_test = np.array([x.sum(axis=0) for x in X_test])
 
-        # TODO: try LR
-        #classifier = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(self.embedding_dim // 2, self.embedding_dim // 4), random_state=42)
         classifier = LogisticRegression()
         t = time.time()
         classifier.fit(X, y)
-        print('fitting classifier took {:.3f}s'.format(time.time() - t))
         score = classifier.score(X_test, y_test)
         if print_score:
             print('Sentiment classification score: {}'.format(score))
@@ -421,11 +348,12 @@ class EmbeddingTaskEvaluator(object):
 
 
 if __name__ == '__main__':
-    method = 'cp-s'
+    method = 'svd'
     evaluator = EmbeddingTaskEvaluator(method)
-    #evaluator.word_classification_tasks()
-    #evaluator.analogy_tasks()
+    #evaluator.word_classification_tasks(print_score=True)
+    evaluator.analogy_tasks()
+    sys.exit()
     #evaluator.sent_classification_tasks()
     #score = evaluator.outlier_detection()
-    evaluator.sentiment_classification_tasks()
+    evaluator.sentiment_classification_tasks(print_score=True)
 

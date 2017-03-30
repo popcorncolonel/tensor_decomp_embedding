@@ -197,7 +197,7 @@ class GensimSandbox(object):
                         symmetric=True,
                         log_info=False,
                         limit_large_vals=False,
-                        neg_sample_percent=.0,
+                        neg_sample_percent=.1,
                         pmi=True,
                     )
                     for gatherer in gatherers
@@ -213,7 +213,8 @@ class GensimSandbox(object):
             mu = 10.
             mean = (1. / self.embedding_dim) * (mu ** (1./3.))
             reg_param = mean / 100.  # ...heuristic
-            reg_param = 0
+            reg_param = 1e-8
+            self.to_save['reg_param'] = reg_param
             print('reg_param: {}'.format(reg_param))
             decomp_method = JointSymmetricCPDecomp(
                 size=len(self.model.vocab),
@@ -224,7 +225,7 @@ class GensimSandbox(object):
                 nonneg=nonneg,
                 gpu=self.gpu,
             )
-        print('Starting Joint CP Decomp training')
+        print('Starting JOINT CP Decomp training')
         decomp_method.train(sparse_tensor_batches())
 
         U = decomp_method.U.eval(self.sess)
@@ -233,11 +234,6 @@ class GensimSandbox(object):
             self.embedding = sparse_embedding
         else:
             self.embedding = U.copy()
-        #################
-        self.evaluate_embedding()
-        print('make sure everything isn\'t just zero')
-        import pdb; pdb.set_trace()
-        pass
 
     def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
         gatherer = self.get_pmi_gatherer(ndims)
@@ -251,8 +247,7 @@ class GensimSandbox(object):
                     debug=False,
                     symmetric=symmetric,
                     log_info=False,
-                    limit_large_vals=False,
-                    neg_sample_percent=.5,
+                    neg_sample_percent=.25,
                     pmi=True,
                 )
                 yield sparse_ppmi_tensor_pair
@@ -274,7 +269,8 @@ class GensimSandbox(object):
                 # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
                 mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
                 reg_param = mean / 100.  # ...heuristic
-                reg_param = 5e-5
+                reg_param = 1e-6
+                self.to_save['reg_param'] = reg_param
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
                     dim=len(self.model.vocab),
@@ -443,6 +439,7 @@ class GensimSandbox(object):
             return err / cnt
         print("MSE: {}".format(mse()))
         self.embedding = embedding
+        import pdb; pdb.set_trace()
         self.evaluate_embedding()
         self.save_metadata()
 
@@ -467,7 +464,7 @@ class GensimSandbox(object):
         evaluator.word_classification_tasks(print_score=True)
         evaluator.sentiment_classification_tasks(print_score=True)
         evaluator.outlier_detection()
-        #evaluator.analogy_tasks()
+        evaluator.analogy_tasks()
         #evaluator.sent_classification_tasks()
 
     def test_embedding_evaluation(self):

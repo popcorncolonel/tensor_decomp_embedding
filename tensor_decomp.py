@@ -470,10 +470,10 @@ class SymmetricCPDecomp(object):
             with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
                 X_ijks = X.values  # of shape (N,) - represents all the values stored in X. 
 
-                prod_vects = tf.gather(U, tf.gather(indices, 0))
+                prod_vects = tf.gather(U, tf.gather(indices, 0, name='0_indices'), name='0_vects')
                 for i in range(1, self.ndims):
-                    i_indices = tf.gather(indices, i)  # of shape (N,) - represents all the indices to get from the U matrix
-                    i_vects = tf.gather(U, i_indices)
+                    i_indices = tf.gather(indices, i, name='{}_indices'.format(i))  # of shape (N,) - represents all the indices to get from the U matrix
+                    i_vects = tf.gather(U, i_indices, name='{}_vects'.format(i))
                     prod_vects *= i_vects
                 predicted_X_ijks = tf.reduce_sum(prod_vects, axis=1)
                
