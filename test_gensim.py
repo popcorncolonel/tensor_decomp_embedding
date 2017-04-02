@@ -134,10 +134,6 @@ class GensimSandbox(object):
         embedding.tensor_name = 'U'
         embedding.metadata_path = 'metadata.tsv'
 
-        sp_embedding = config.embeddings.add()
-        sp_embedding.tensor_name = 'Sparse_U'
-        sp_embedding.metadata_path = 'metadata.tsv'
-
         projector.visualize_embeddings(summary_writer, config)
 
     def train_gensim_embedding(self):
@@ -346,8 +342,9 @@ class GensimSandbox(object):
         else:
             print('creating sparse count tensor...')
         indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=False, pmi=pmi)
-        scipy.io.savemat('sp_tensor_{}_{}.mat'.format(self.num_sents, self.min_count), {'indices': indices, 'values': values})
-        print('saved. exiting.')
+        matfile_name = 'sp_tensor_{}_{}.mat'.format(self.num_sents, self.min_count)
+        scipy.io.savemat(mat_filename, {'indices': indices, 'values': values})
+        print('saved {}. exiting.'.format(mat_filename))
         sys.exit()
 
         from pymatbridge import Matlab
@@ -410,7 +407,7 @@ class GensimSandbox(object):
         values = d['values'].T
         indices = d['indices']
 
-        d = scipy.io.loadmat('../matlab/UVW_100_10e6_2000.mat')
+        d = scipy.io.loadmat('../matlab/UVW_300_10e6_2000.mat')
         U = d['U']
         V = d['V']
         W = d['W']
@@ -439,9 +436,6 @@ class GensimSandbox(object):
             return err / cnt
         print("MSE: {}".format(mse()))
         self.embedding = embedding
-        import pdb; pdb.set_trace()
-        self.evaluate_embedding()
-        self.save_metadata()
 
     def train_svd_embedding(self):
         gatherer = self.get_pmi_gatherer(2)
@@ -548,9 +542,9 @@ class GensimSandbox(object):
         elif self.method in ['jcp-s']:  # Joint Symmetric CP Decomp experiments
             self.method += experiment
             self.train_joint_online_cp_embedding(dimlist=[2,3], nonneg=False)
-        elif self.method in ['jcp-sn']:
+        elif self.method in ['jcp-s_432']:
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3], nonneg=True)
+            self.train_joint_online_cp_embedding(dimlist=[2,3,4], nonneg=True)
         elif self.method in ['nnse']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True)

@@ -413,6 +413,7 @@ def evaluate_on_all(w):
     logger.info("Analogy prediction accuracy on {} {}".format("SemEval2012", analogy_results["SemEval2012_2"]))
     '''
     
+    '''
     # Calculate results on categorization
     logger.info("Calculating categorization benchmarks")
     categorization_tasks = {
@@ -434,9 +435,10 @@ def evaluate_on_all(w):
     # Construct pd table
     cat = pd.DataFrame([categorization_results])
     #analogy = pd.DataFrame([analogy_results])
+    '''
     sim = pd.DataFrame([similarity_results])
     results = sim
     #results = cat.join(sim).join(analogy)
-    results = cat.join(sim)
+    #results = cat.join(sim)
 
     return results

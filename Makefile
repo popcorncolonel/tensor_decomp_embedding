@@ -1,6 +1,6 @@
 min_count = 2000
 num_sents = 10e6
-embedding_dim = 400
+embedding_dim = 300
 
 random:
 	python3 -m pdb -c continue test_gensim.py --method=random --min_count=$(min_count) --num_sents=$(num_sents) --embedding_dim=$(embedding_dim)
@@ -18,8 +18,8 @@ cp-sn_4d:
 
 jcp-s:
 	python3 -m pdb -c continue test_gensim.py --method=jcp-s --min_count=$(min_count) --num_sents=$(num_sents) --embedding_dim=$(embedding_dim)
-jcp-sn:
-	python3 -m pdb -c continue test_gensim.py --method=jcp-sn --min_count=$(min_count) --num_sents=$(num_sents) --embedding_dim=$(embedding_dim)
+jcp-s_432:
+	python3 -m pdb -c continue test_gensim.py --method=jcp-s_432 --min_count=$(min_count) --num_sents=$(num_sents) --embedding_dim=$(embedding_dim)
 
 cbow:
 	python3 -m pdb -c continue test_gensim.py --method=cbow --min_count=$(min_count) --num_sents=$(num_sents) --embedding_dim=$(embedding_dim)
