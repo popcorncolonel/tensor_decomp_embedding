@@ -148,8 +148,8 @@ class EmbeddingComparison(object):
             method = evaluator.method
             opp, accuracy = evaluator.outlier_detection(verbose=False, n=n)
             self.print_method(evaluator.method)
-            print("Outlier detection OPP: {}".format(opp))
-            print("Outlier detection accuracy: {}".format(accuracy))
+            print("OD{} OPP: {}".format(n, opp))
+            print("OD{} accuracy: {}".format(n, accuracy))
             opp_dict[method] = opp / 100.0
             acc_dict[method] = accuracy / 100.0
         return opp_dict, acc_dict
@@ -208,14 +208,14 @@ class EmbeddingComparison(object):
             outlier_det3_opps, outlier_det3_accs = self.compare_outlier_detection(n=3)
             analogy_sem_results, analogy_syn_results = self.compare_analogy()
             result_name_pairs = [
-                (analogy_sem_results, 'analogy (sem)'),
-                (analogy_syn_results, 'analogy (syn)'),
-                (sentiment_classification_results, 'sentiment classification'), 
-                (word_class_results, 'word classification'), 
-                (outlier_det2_opps, 'outlier detection (2) OPP'), 
-                (outlier_det2_accs, 'outlier detection (2) acc'), 
-                (outlier_det3_opps, 'outlier detection (3) OPP'), 
-                (outlier_det3_accs, 'outlier detection (3) acc'), 
+                (analogy_sem_results, 'Analogy (sem)'),
+                (analogy_syn_results, 'Analogy (syn)'),
+                (sentiment_classification_results, 'Sentiment analysis'), 
+                (word_class_results, 'Word classification'), 
+                (outlier_det2_opps, 'OD2 OPP'), 
+                (outlier_det2_accs, 'OD2 acc'), 
+                (outlier_det3_opps, 'OD3 OPP'), 
+                (outlier_det3_accs, 'OD3 acc'), 
             ]
             df = pd.DataFrame([ d for (d, name) in result_name_pairs ])
             df.index = [ name for (d, name) in result_name_pairs ]

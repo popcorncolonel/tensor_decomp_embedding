@@ -193,7 +193,7 @@ class GensimSandbox(object):
                         symmetric=True,
                         log_info=False,
                         limit_large_vals=False,
-                        neg_sample_percent=.1,
+                        neg_sample_percent=0.0,
                         pmi=True,
                     )
                     for gatherer in gatherers
