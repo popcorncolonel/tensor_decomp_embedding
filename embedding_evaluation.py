@@ -209,7 +209,7 @@ class EmbeddingTaskEvaluator(object):
         train_op = None
         loss = None
         with sess.as_default():
-            with tf.device('/gpu:0'):
+            with tf.device('/cpu:0'):
                 W1 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W1', dtype=tf.float64)
                 W2 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W2', dtype=tf.float64)
                 W3 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W3', dtype=tf.float64)
@@ -242,7 +242,7 @@ class EmbeddingTaskEvaluator(object):
 
                 def chunker(seq, size):
                     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-                n_iters = 3
+                n_iters = 1
                 for _ in range(n_iters):
                     if verbose:
                         print('running batches...')
@@ -258,7 +258,7 @@ class EmbeddingTaskEvaluator(object):
                                 print('loss at step {}: {}'.format(step, loss_val))
         return sess, W1.eval(sess), W2.eval(sess), W3.eval(sess)
 
-    def analogy_tasks(self, verbose=True):
+    def analogy_tasks(self, train_pct=1.0, verbose=True):
         '''
         Currently not working for any embedding. 
         '''
@@ -267,38 +267,49 @@ class EmbeddingTaskEvaluator(object):
         if verbose:
             print("{} training words".format(len(X)))
             print("{} testing words".format(len(X_test)))
+        X = X[:int(train_pct * len(X))]
+        y = y[:int(train_pct * len(y))]
         sess, W1, W2, W3 = self._analogy_train_NN(X, y)
+        print('learned NN. evaluating...')
 
         correct_syn = 0
         total_syn = 0
         correct_sem = 0
         total_sem = 0
-        for p, query, correct_word, cat in zip(X_test, word_X_test, word_y_test, categories):
-            def get_closest_vocab_word(predicted):
-                best_word = None
-                best_vect = None
-                best_dist = float('-inf')
-                for word, vect in self.embedding_dict.items():
-                    if word not in query:
-                        dist = np.dot(vect, predicted)  # cosine similarity
-                        dist /= (np.linalg.norm(vect) * np.linalg.norm(predicted))
-                        if dist > best_dist:
-                            best_word = word
-                            best_vect = vect
-                            best_dist = dist
-                return best_word, best_vect
+        def get_closest_vocab_word(predicted, query):
+            best_word = None
+            best_vect = None
+            best_dist = float('-inf')
+            for word, vect in self.embedding_dict.items():
+                if word not in query:
+                    dist = np.dot(vect, predicted)  # cosine similarity
+                    dist /= (np.linalg.norm(vect) * np.linalg.norm(predicted))
+                    if dist > best_dist:
+                        best_word = word
+                        best_vect = vect
+                        best_dist = dist
+            return best_word, best_vect
 
-            predicted = -np.dot(W1, p[0]) + np.dot(W2, p[1]) + np.dot(W3, p[2])
-            predicted /= np.linalg.norm(predicted)
-            predicted = np.squeeze(predicted)
-
-            best_word, best_vect = get_closest_vocab_word(predicted)
+        ordered_embedding_words = []
+        embedding_mat = []
+        for word, vect in self.embedding_dict.items():
+            ordered_embedding_words.append(word)
+            embedding_mat.append(vect)
+        embedding_mat = np.array(embedding_mat)  # |V| x k
+        P1 = np.array([x[0] for x in X_test])
+        P2 = np.array([x[1] for x in X_test])
+        P3 = np.array([x[2] for x in X_test])
+        predictions = -np.dot(W1, P1.T) + np.dot(W2, P2.T) + np.dot(W3, P3.T)
+        dots = np.dot(embedding_mat, predictions)
+        argmaxes = np.argmax(dots, axis=0)
+        predicted_words = [ordered_embedding_words[i] for i in argmaxes]
+        for predicted_word, correct_word, cat in zip(predicted_words, word_y_test, categories):
             if cat == 'syntactic':
-                if best_word == correct_word:
+                if predicted_word == correct_word:
                     correct_syn += 1
                 total_syn += 1
             elif cat == 'semantic':
-                if best_word == correct_word:
+                if predicted_word == correct_word:
                     correct_sem += 1
                 total_sem += 1
             else:
@@ -395,9 +406,10 @@ class EmbeddingTaskEvaluator(object):
 
 
 if __name__ == '__main__':
-    method = 'nnse'
+    method = 'jcp-s_1e-8_reg'
     evaluator = EmbeddingTaskEvaluator(method)
-    evaluator.word_classification_tasks(print_score=True)
+    #evaluator.word_classification_tasks(print_score=True)
+    evaluator.analogy_tasks()
     sys.exit()
     #score = evaluator.outlier_detection()
     evaluator.sentiment_classification_tasks(print_score=True)

@@ -181,7 +181,7 @@ class GensimSandbox(object):
 
     def train_joint_online_cp_embedding(self, dimlist: list, dimweights: list, nonneg: bool):
         gatherers = [self.get_pmi_gatherer(dim) for dim in dimlist]
-        exp_shifts = [1., 5.]
+        exp_shifts = [1., 1.]
         shifts = [-np.log2(s) for s in exp_shifts]
 
         def sparse_tensor_batches(batch_size=1000):
@@ -194,7 +194,6 @@ class GensimSandbox(object):
                         debug=False,
                         symmetric=True,
                         log_info=False,
-                        limit_large_vals=False,
                         neg_sample_percent=0.0,
                         pmi=True,
                         shift=shift,
@@ -208,11 +207,7 @@ class GensimSandbox(object):
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
-            mu = 20.
-            mean = (1. / self.embedding_dim) * (mu ** (1./4.))
-            reg_param = mean / 100.  # ...heuristic
-            reg_param = 1e-7
+            reg_param = 1e-6
             self.to_save['reg_param'] = reg_param
             print('reg_param: {}'.format(reg_param))
             decomp_method = JointSymmetricCPDecomp(
@@ -544,7 +539,7 @@ class GensimSandbox(object):
             self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True)
         elif self.method in ['jcp-s']:  # Joint Symmetric CP Decomp experiments
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3], dimweights=[1., .85,], nonneg=False)
+            self.train_joint_online_cp_embedding(dimlist=[2,3], dimweights=[1., 1.,], nonneg=False)
         elif self.method in ['jcp-s_432']:
             self.method += experiment
             self.train_joint_online_cp_embedding(dimlist=[2,3,4], dimweights=[2., .4, .1], nonneg=False)

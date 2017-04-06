@@ -125,14 +125,14 @@ class EmbeddingComparison(object):
             score_dict[method] = score
         return score_dict
 
-    def compare_analogy(self):
+    def compare_analogy(self, train_pct):
         print("\n==================================")
         # TODO: multithread this
         sem_dict = {}
         syn_dict = {}
         for evaluator in self.evaluators:
             self.print_method(evaluator.method)
-            (sem_score, syn_score) = evaluator.analogy_tasks()
+            (sem_score, syn_score) = evaluator.analogy_tasks(train_pct=train_pct)
             print("Analogy sem/syn scores: {}".format((sem_score, syn_score)))
             method = evaluator.method
             sem_dict[method] = sem_score
@@ -206,8 +206,17 @@ class EmbeddingComparison(object):
             word_class_results = self.compare_word_classification()
             outlier_det2_opps, outlier_det2_accs = self.compare_outlier_detection(n=2)
             outlier_det3_opps, outlier_det3_accs = self.compare_outlier_detection(n=3)
-            analogy_sem_results, analogy_syn_results = self.compare_analogy()
+            analogy_sem_results_10, analogy_syn_results_10 = self.compare_analogy(.10)
+            analogy_sem_results_30, analogy_syn_results_30 = self.compare_analogy(.3)
+            analogy_sem_results_50, analogy_syn_results_50 = self.compare_analogy(.5)
+            analogy_sem_results, analogy_syn_results = self.compare_analogy(1.0)
             result_name_pairs = [
+                (analogy_sem_results_10, 'Analogy 10% (sem)'),
+                (analogy_syn_results_10, 'Analogy 10% (syn)'),
+                (analogy_sem_results_30, 'Analogy 30% (sem)'),
+                (analogy_syn_results_30, 'Analogy 30% (syn)'),
+                (analogy_sem_results_50, 'Analogy 50% (sem)'),
+                (analogy_syn_results_50, 'Analogy 50% (syn)'),
                 (analogy_sem_results, 'Analogy (sem)'),
                 (analogy_syn_results, 'Analogy (syn)'),
                 (sentiment_classification_results, 'Sentiment analysis'), 
@@ -251,7 +260,7 @@ if __name__ == '__main__':
     embedding_dim_list = None
     if comparison_name == '10e6':
         num_sents = int(10e6)
-        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s_log15', 'cp-sn', 'jcp-s']
+        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s_log15', 'cp-sn', 'jcp-s', 'jcp-s_equalweights']
         embedding_dim = 300
     elif comparison_name == 'shifted':
         num_sents = int(10e6)
@@ -259,7 +268,7 @@ if __name__ == '__main__':
         embedding_dim = 300
     elif comparison_name == 'jcp-s':
         num_sents = int(10e6)
-        methods = ['jcp-s', 'jcp-s_log1log5_1.5_1weights']
+        methods = ['jcp-s','jcp-s_equalweights', 'nnse', 'cbow']
         embedding_dim = 300
     elif comparison_name == 'jcp-s_dims':  # JCP-S EMBEDDING DIM COMPARISON
         num_sents = int(10e6)
@@ -284,7 +293,9 @@ if __name__ == '__main__':
     )
 
     # Don't really need num runs because most of these methods aren't even stochastic (wordsim, etc)
-    #comparator.compare_web()
+    #comparator.compare_outlier_detection(2)
+    #comparator.compare_outlier_detection(3)
+    #comparator.compare_analogy(.1)
     #sys.exit()
     comparator.compare_all()
 

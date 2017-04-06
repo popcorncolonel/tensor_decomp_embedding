@@ -605,7 +605,7 @@ class JointSymmetricCPDecomp(SymmetricCPDecomp):
                 shape_sparse = np.array([size] * dim, dtype=np.int64)
                 self.X_ts.append(tf.SparseTensorValue(indices, values, shape=shape_sparse))
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
-            mu = 10.0
+            mu = 15.0
             mean = ((1. / self.rank) * mu) ** (1/2)
             self.U = tf.Variable(tf.random_normal(
                 shape=[size, self.rank],
