@@ -230,16 +230,17 @@ class EmbeddingComparison(object):
         df_sum = all_dfs[0]
         for df in all_dfs[1:]:
             df_sum += df
-        all_df = (1. / num_runs) * df_sum
+        avg_df = (1. / num_runs) * df_sum
         # write to excel file
         excel_fname = 'comparison_{}_{}_{}.xlsx'.format(self.num_sents, self.min_count, self.comparison_name)
         writer = pd.ExcelWriter(excel_fname)
-        all_df.to_excel(writer)
+        avg_df.to_excel(writer)
         writer.save()
+        print(avg_df)
         print('Saved to {}'.format(excel_fname))
         print('Num runs: {}'.format(num_runs))
 
-        return all_df
+        return avg_df
 
 
 if __name__ == '__main__':
@@ -248,9 +249,17 @@ if __name__ == '__main__':
     comparison_name = sys.argv[1]
     embedding_dim = None
     embedding_dim_list = None
-    if comparison_name == '10e6':  # 10E6 SENTS
+    if comparison_name == '10e6':
         num_sents = int(10e6)
-        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s', 'cp-sn', 'jcp-s']
+        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s_log15', 'cp-sn', 'jcp-s']
+        embedding_dim = 300
+    elif comparison_name == 'shifted':
+        num_sents = int(10e6)
+        methods = ['cp-s'] + ['cp-s_log{}'.format(i) for i in [5, 10, 15, 20, 25]]
+        embedding_dim = 300
+    elif comparison_name == 'jcp-s':
+        num_sents = int(10e6)
+        methods = ['jcp-s', 'jcp-s_log1log5_1.5_1weights']
         embedding_dim = 300
     elif comparison_name == 'jcp-s_dims':  # JCP-S EMBEDDING DIM COMPARISON
         num_sents = int(10e6)
@@ -262,8 +271,8 @@ if __name__ == '__main__':
         embedding_dim = 300
     elif comparison_name == 'test':
         num_sents = int(10e6)
-        methods = ['cp-s', 'cp-sn', 'jcp-s']
-        embedding_dim_list = [300]
+        methods = ['cbow', 'cp-s', 'cp-sn', 'jcp-s', 'jcp-s_432']
+        embedding_dim = 300
     min_count = 2000
     comparator = EmbeddingComparison(
         methods=methods,
@@ -275,5 +284,7 @@ if __name__ == '__main__':
     )
 
     # Don't really need num runs because most of these methods aren't even stochastic (wordsim, etc)
+    #comparator.compare_web()
+    #sys.exit()
     comparator.compare_all()
 

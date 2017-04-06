@@ -289,6 +289,7 @@ class CPDecomp(object):
 
         print('initializing variables...')
         self.sess.run(tf.global_variables_initializer())
+        print("U: {}".format(self.U.eval(self.sess)))
         with self.sess.as_default():
             print('looping through batches...')
             for expected_indices, expected_values in expected_tensors:
@@ -386,7 +387,7 @@ class SymmetricCPDecomp(object):
                 mu = 10.0
             else:
                 mu = self.mean_value
-            mean = (1. / self.rank) * (mu ** (1/self.ndims))
+            mean = ((1. / self.rank) * mu) ** (1/self.ndims)
             self.U = tf.Variable(tf.random_normal(
                 shape=[dim, self.rank],
                 mean=mean,
@@ -575,7 +576,7 @@ class SymmetricCPDecomp(object):
 
 
 class JointSymmetricCPDecomp(SymmetricCPDecomp):
-    def __init__(self, size, rank, sess, dimlist=[2,3], reg_param=1e-10, nonneg=True, gpu=True):
+    def __init__(self, size, rank, sess, dimlist=[2,3], dimweights=[1., 1.], reg_param=1e-10, nonneg=True, gpu=True):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
         since X is supersymmetric, `size` is the length of each dimension
@@ -583,6 +584,8 @@ class JointSymmetricCPDecomp(SymmetricCPDecomp):
         Approximates a supersymmetric tensor whose approximations are repeatedly fed in batch format (indices always in sorted order) to `self.train`
         '''
         self.dimlist = dimlist
+        self.dimweights = dimweights
+        assert len(dimlist) == len(dimweights)
         self.rank = rank
         self.sess = sess
         self.nonneg = nonneg
@@ -603,12 +606,13 @@ class JointSymmetricCPDecomp(SymmetricCPDecomp):
                 self.X_ts.append(tf.SparseTensorValue(indices, values, shape=shape_sparse))
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
             mu = 10.0
-            mean = (1. / self.rank) * (mu ** (1/3))
+            mean = ((1. / self.rank) * mu) ** (1/2)
             self.U = tf.Variable(tf.random_normal(
                 shape=[size, self.rank],
                 mean=mean,
                 stddev=mean / 5,
             ), name="U")
+            print('nonneg: {}'.format(self.nonneg))
             if self.nonneg:
                 self.sparse_U = tf.nn.relu(self.U, name='Sparse_U')
         self.create_loss_fn(reg_param=reg_param)
@@ -696,7 +700,7 @@ class JointSymmetricCPDecomp(SymmetricCPDecomp):
             self.reg = tf.constant(0.0)
         self.Ls = []
         for i, dim in enumerate(self.dimlist):
-            self.Ls.append(L(self.X_ts[i], U, dim))
+            self.Ls.append(self.dimweights[i] * L(self.X_ts[i], U, dim))
         self.L = sum(self.Ls)
         self.loss = self.L + self.reg
 

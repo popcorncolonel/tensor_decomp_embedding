@@ -179,8 +179,10 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_joint_online_cp_embedding(self, dimlist: list, nonneg: bool):
+    def train_joint_online_cp_embedding(self, dimlist: list, dimweights: list, nonneg: bool):
         gatherers = [self.get_pmi_gatherer(dim) for dim in dimlist]
+        exp_shifts = [1., 5.]
+        shifts = [-np.log2(s) for s in exp_shifts]
 
         def sparse_tensor_batches(batch_size=1000):
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
@@ -195,8 +197,9 @@ class GensimSandbox(object):
                         limit_large_vals=False,
                         neg_sample_percent=0.0,
                         pmi=True,
+                        shift=shift,
                     )
-                    for gatherer in gatherers
+                    for (shift, gatherer) in zip(shifts, gatherers)
                 ]
                 yield ([x[0] for x in pairlist], [x[1] for x in pairlist])
 
@@ -206,20 +209,21 @@ class GensimSandbox(object):
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
             # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
-            mu = 10.
-            mean = (1. / self.embedding_dim) * (mu ** (1./3.))
+            mu = 20.
+            mean = (1. / self.embedding_dim) * (mu ** (1./4.))
             reg_param = mean / 100.  # ...heuristic
-            reg_param = 1e-8
+            reg_param = 1e-7
             self.to_save['reg_param'] = reg_param
             print('reg_param: {}'.format(reg_param))
             decomp_method = JointSymmetricCPDecomp(
                 size=len(self.model.vocab),
                 dimlist=dimlist,
+                dimweights=dimweights,
                 rank=self.embedding_dim,
                 sess=self.sess,
                 reg_param=reg_param,
                 nonneg=nonneg,
-                gpu=self.gpu,
+                gpu=True,
             )
         print('Starting JOINT CP Decomp training')
         decomp_method.train(sparse_tensor_batches())
@@ -233,6 +237,10 @@ class GensimSandbox(object):
 
     def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
         gatherer = self.get_pmi_gatherer(ndims)
+        if nonneg:
+            shift = 0.
+        else:
+            shift = -np.log2(15.)
 
         def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
             batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
@@ -243,8 +251,9 @@ class GensimSandbox(object):
                     debug=False,
                     symmetric=symmetric,
                     log_info=False,
-                    neg_sample_percent=.25,
+                    neg_sample_percent=0.0 if nonneg else 0.05,
                     pmi=True,
+                    shift=shift,
                 )
                 yield sparse_ppmi_tensor_pair
 
@@ -256,7 +265,7 @@ class GensimSandbox(object):
         with self.sess.as_default():
             if symmetric:
                 print('getting full PMI tensor...')
-                (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric)
+                (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric, shift=shift)
                 mean_value = np.mean(values)
                 print('mean tensor value: {}'.format(mean_value))
 
@@ -276,7 +285,7 @@ class GensimSandbox(object):
                     optimizer_type='adam',
                     reg_param=reg_param,
                     nonneg=nonneg,
-                    gpu=self.gpu,
+                    gpu=False,
                     mean_value=mean_value,
                 )
             else:
@@ -341,10 +350,10 @@ class GensimSandbox(object):
             print('creating PPMI tensor...')
         else:
             print('creating sparse count tensor...')
-        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=False, pmi=pmi)
-        matfile_name = 'sp_tensor_{}_{}.mat'.format(self.num_sents, self.min_count)
-        scipy.io.savemat(mat_filename, {'indices': indices, 'values': values})
-        print('saved {}. exiting.'.format(mat_filename))
+        indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=False, pmi=pmi, shift=-np.log2(15.))
+        matfile_name = 'sp_tensor_{}_{}_log15.mat'.format(self.num_sents, self.min_count)
+        scipy.io.savemat(matfile_name, {'indices': indices, 'values': values})
+        print('saved {}. exiting.'.format(matfile_name))
         sys.exit()
 
         from pymatbridge import Matlab
@@ -403,11 +412,11 @@ class GensimSandbox(object):
 
     def loadmatlab(self):
         #d = scipy.io.loadmat('../matlab/sp_tensor.mat')
-        d = scipy.io.loadmat('sp_tensor_10000000_2000.mat')
+        d = scipy.io.loadmat('sp_tensor_10000000_2000_log15.mat')
         values = d['values'].T
         indices = d['indices']
 
-        d = scipy.io.loadmat('../matlab/UVW_300_10e6_2000.mat')
+        d = scipy.io.loadmat('../matlab/UVW_300_10e6_2000_log15.mat')
         U = d['U']
         V = d['V']
         W = d['W']
@@ -501,12 +510,6 @@ class GensimSandbox(object):
         except Exception as e:
             print(e)
             print('caught exception trying to dump model. wooops. carrying on...')
-        try:
-            with open(parent_dir + '/sandbox.pkl', 'wb') as f:
-                dill.dump(self, f)
-        except Exception as e:
-            print(e)
-            print('caught exception trying to dump SANDBOX. carrying on...')
         for name, obj in self.to_save.items():
             fname = parent_dir + '/' + name + '.pkl'
             with open(fname, 'wb') as f:
@@ -541,10 +544,10 @@ class GensimSandbox(object):
             self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True)
         elif self.method in ['jcp-s']:  # Joint Symmetric CP Decomp experiments
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3], nonneg=False)
+            self.train_joint_online_cp_embedding(dimlist=[2,3], dimweights=[1., .85,], nonneg=False)
         elif self.method in ['jcp-s_432']:
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3,4], nonneg=True)
+            self.train_joint_online_cp_embedding(dimlist=[2,3,4], dimweights=[2., .4, .1], nonneg=False)
         elif self.method in ['nnse']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True)
@@ -562,6 +565,10 @@ class GensimSandbox(object):
             self.restore_from_ckpt()
         else:
             raise ValueError('undefined method {}'.format(self.method))
+        for i, vec in enumerate(self.embedding):
+            if np.linalg.norm(vec) == 0.0:
+                self.embedding[i][0] += 1e-4
+
         self.evaluate_embedding()
         self.save_metadata()
         print('All done training and evaluating {}!'.format(self.method))

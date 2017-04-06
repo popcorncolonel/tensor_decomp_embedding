@@ -291,6 +291,7 @@ class PMIGatherer(object):
         limit_large_vals=False,
         neg_sample_percent: float=0.0,
         pmi=True,
+        shift=0.0,
     ):
         if log_info:
             print('Creating Sparse PMI tensor...', end='')
@@ -319,6 +320,7 @@ class PMIGatherer(object):
             indices = np.array(new_indices)
             values = np.array(new_vals)
         num_total_vals = len(values)
+        values += shift
         if positive:
             positive_args = np.argwhere(values > 0.0)
             indices = np.squeeze(indices[positive_args])  # squeeze to get rid of the 1-dimension columns (resulting from the indices[positive_args])

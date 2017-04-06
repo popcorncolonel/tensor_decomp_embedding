@@ -84,7 +84,7 @@ class EmbeddingTaskEvaluator(object):
         random.seed(42 + self.seed_bump)
 
     @lru_cache()
-    def get_word_classification_data(self, split_type='train'):
+    def get_word_classification_data_old(self, split_type='train'):
         words_and_POSs = []
         with open('evaluation_data/pos.txt') as f:
             for line in list(f):
@@ -109,13 +109,42 @@ class EmbeddingTaskEvaluator(object):
             X = sklearn.preprocessing.normalize(X)
         return X, y
 
+    @lru_cache()
+    def get_word_classification_data(self, split_type='train'):
+        words_and_emotions = []
+        with open('evaluation_data/emotions.txt') as f:
+            for line in list(f):
+                line = line.strip()
+                [word, emotion] = line.split(maxsplit=1)
+                if word in self.embedding_dict:
+                    words_and_emotions.append((word, emotion))
+        random.seed(42 + self.seed_bump)
+        random.shuffle(words_and_emotions)
+        deterministic_words = [(self.embedding_dict[word], cls) for (word, cls) in words_and_emotions if ' ' not in cls]  # Words with only one possible class
+        pos_neg_words = [(vec, cls) for (vec, cls) in deterministic_words if cls in ['emotion_positive', 'emotion_negative']]
+        deterministic_words = pos_neg_words
+        num_words = len(deterministic_words)
+        split_point = int(.85 * num_words)
+        if split_type == 'train':
+            data = deterministic_words[:split_point]
+        elif split_type == 'test':
+            data = deterministic_words[split_point:]
+        else:
+            raise ValueError('Unrecognized split type {}'.format(split_type))
+        X = np.array([x for (x,y_) in data])
+        y = np.array([y_ for (x,y_) in data])
+        if self.normalize_vects:
+            X = sklearn.preprocessing.normalize(X)
+        return X, y
+
     def word_classification_tasks(self, print_score=False):
         X, y = self.get_word_classification_data('train')
         X_test, y_test = self.get_word_classification_data('test')
 
-        LR = LogisticRegression()
-        LR.fit(X, y)
-        score = LR.score(X_test, y_test)
+        #classifier = LogisticRegression()
+        classifier = MLPClassifier(hidden_layer_sizes=(100, 42))
+        classifier.fit(X, y)
+        score = classifier.score(X_test, y_test)
         if print_score:
             print('Word classification score: {}'.format(score))
         with open('results/word_class_{}.txt'.format(self.method), 'w') as f:
@@ -366,10 +395,9 @@ class EmbeddingTaskEvaluator(object):
 
 
 if __name__ == '__main__':
-    method = 'svd'
+    method = 'nnse'
     evaluator = EmbeddingTaskEvaluator(method)
-    #evaluator.word_classification_tasks(print_score=True)
-    evaluator.analogy_tasks()
+    evaluator.word_classification_tasks(print_score=True)
     sys.exit()
     #score = evaluator.outlier_detection()
     evaluator.sentiment_classification_tasks(print_score=True)

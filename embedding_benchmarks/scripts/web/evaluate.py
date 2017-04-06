@@ -359,7 +359,7 @@ def evaluate_similarity(w, X, y):
     return scipy.stats.spearmanr(scores, y).correlation
 
 
-def evaluate_on_all(w):
+def evaluate_on_all(w, categorization=True):
     """
     Evaluate Embedding on all fast-running benchmarks
 
@@ -413,32 +413,33 @@ def evaluate_on_all(w):
     logger.info("Analogy prediction accuracy on {} {}".format("SemEval2012", analogy_results["SemEval2012_2"]))
     '''
     
-    '''
-    # Calculate results on categorization
-    logger.info("Calculating categorization benchmarks")
-    categorization_tasks = {
-        "AP": fetch_AP(),
-        "BLESS": fetch_BLESS(),
-        "Battig": fetch_battig(),
-        "ESSLI_2c": fetch_ESSLI_2c(),
-        "ESSLI_2b": fetch_ESSLI_2b(),
-        "ESSLI_1a": fetch_ESSLI_1a()
-    }
+    if categorization:
+        # Calculate results on categorization
+        logger.info("Calculating categorization benchmarks")
+        categorization_tasks = {
+            "AP": fetch_AP(),
+            "BLESS": fetch_BLESS(),
+            "Battig": fetch_battig(),
+            "ESSLI_2c": fetch_ESSLI_2c(),
+            "ESSLI_2b": fetch_ESSLI_2b(),
+            "ESSLI_1a": fetch_ESSLI_1a()
+        }
 
-    categorization_results = {}
+        categorization_results = {}
 
-    # Calculate results using helper function
-    for name, data in iteritems(categorization_tasks):
-        categorization_results[name] = evaluate_categorization(w, data.X, data.y)
-        logger.info("Cluster purity on {} {}".format(name, categorization_results[name]))
+        # Calculate results using helper function
+        for name, data in iteritems(categorization_tasks):
+            categorization_results[name] = evaluate_categorization(w, data.X, data.y)
+            logger.info("Cluster purity on {} {}".format(name, categorization_results[name]))
 
-    # Construct pd table
-    cat = pd.DataFrame([categorization_results])
+        # Construct pd table
+        cat = pd.DataFrame([categorization_results])
+
     #analogy = pd.DataFrame([analogy_results])
-    '''
     sim = pd.DataFrame([similarity_results])
     results = sim
-    #results = cat.join(sim).join(analogy)
-    #results = cat.join(sim)
+    if categorization:
+        results = cat.join(sim)
+    #results = cat.join(analogy)
 
     return results
