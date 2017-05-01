@@ -216,8 +216,11 @@ class PMIGatherer(object):
                 if len(self.n_counts) > 1e8:
                     self.kill_ncounts(0.5, 1)
                     remaining = len(self.n_counts)
-                    if remaining > 8e7:
-                        self.kill_ncounts(0.5, 2)
+                    if remaining > 9e7:
+                        self.kill_ncounts(0.6, 2)
+                        remaining = len(self.n_counts)
+                        if remaining > 8e7:
+                            self.kill_ncounts(0.7, 3)
         else:  # time is more impt than memory
             print('Populating count dicts (in parallel)...')
             batch_counts, n_samples_per_batch = zip(*Parallel(n_jobs=50)(delayed(update_counts)(self, b) for b in batches))

@@ -7,6 +7,8 @@ random:
 
 cp:
 	python3 -m pdb -c continue test_gensim.py --method=cp --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+cp-s_nodebug:
+	python3 test_gensim.py --method=cp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cp-s:
 	python3 -m pdb -c continue test_gensim.py --method=cp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cp-sn:
