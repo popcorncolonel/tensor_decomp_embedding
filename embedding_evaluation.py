@@ -83,15 +83,17 @@ class EmbeddingTaskEvaluator(object):
         self.seed_bump = seed_bump
         random.seed(42 + self.seed_bump)
 
-    @lru_cache()
-    def get_word_classification_data_old(self, split_type='train'):
+    #@lru_cache()
+    def get_word_classification_data_pos(self, split_type='train'):
         words_and_POSs = []
         with open('evaluation_data/pos.txt') as f:
+            all_words = set()
             for line in list(f):
                 line = line.strip()
                 [word, pos] = line.split(maxsplit=1)
-                if word in self.embedding_dict:
+                if word in self.embedding_dict and word not in all_words:
                     words_and_POSs.append((word, pos))
+                    all_words.add(word)
         random.seed(42 + self.seed_bump)
         random.shuffle(words_and_POSs)
         deterministic_words = [(self.embedding_dict[word], pos) for (word, pos) in words_and_POSs if ' ' not in pos]  # Words with only one possible POS
@@ -109,8 +111,8 @@ class EmbeddingTaskEvaluator(object):
             X = sklearn.preprocessing.normalize(X)
         return X, y
 
-    @lru_cache()
-    def get_word_classification_data(self, split_type='train'):
+    #@lru_cache()
+    def get_word_classification_data_emotions(self, split_type='train'):
         words_and_emotions = []
         with open('evaluation_data/emotions.txt') as f:
             for line in list(f):
@@ -137,35 +139,42 @@ class EmbeddingTaskEvaluator(object):
             X = sklearn.preprocessing.normalize(X)
         return X, y
 
-    def word_classification_tasks(self, print_score=False):
-        X, y = self.get_word_classification_data('train')
-        X_test, y_test = self.get_word_classification_data('test')
+    def word_classification_tasks(self, print_score=False, classification_problem='PoS', train_pct=1.0):
+        if classification_problem == 'PoS':
+            X, y = self.get_word_classification_data_pos('train')
+            X_test, y_test = self.get_word_classification_data_pos('test')
+        elif classification_problem == 'emotions':
+            X, y = self.get_word_classification_data_emotions('train')
+            X_test, y_test = self.get_word_classification_data_emotions('test')
+        else:
+            raise ValueError(classification_problem + ' not defined')
+        X = X[:int(len(X) * train_pct)]
+        y = y[:int(len(y) * train_pct)]
 
-        #classifier = LogisticRegression()
-        classifier = MLPClassifier(hidden_layer_sizes=(100, 42))
+        classifier = LogisticRegression()
+        #classifier = MLPClassifier(hidden_layer_sizes=(100, 42))
         classifier.fit(X, y)
         score = classifier.score(X_test, y_test)
         if print_score:
-            print('Word classification score: {}'.format(score))
-        with open('results/word_class_{}.txt'.format(self.method), 'w') as f:
-            print('Score: {}'.format(score), file=f)
+            print('Word classification ({}, {}%) score: {}'.format(classification_problem, int(train_pct*100), score))
         return score
 
     @lru_cache()
-    def get_analogy_data(self, split_type='train'):
+    def get_analogy_data(self, split_type='train', seed=0):
         from embedding_benchmarks.scripts.web.datasets.analogy import fetch_google_analogy
         analogy = fetch_google_analogy()
         X = analogy['X']
         y = analogy['y']
         categories = analogy['category_high_level']
         parallel_lists = list(zip(X,y,categories))
-        random.seed(42 + self.seed_bump)
+        random.seed(42 + seed)
         random.shuffle(parallel_lists)
         X = [x[0] for x in parallel_lists]
         y = [x[1] for x in parallel_lists]
         categories = [x[2] for x in parallel_lists]
         valid_pairs = []
-        word_pairs = []
+        query_words = []
+        answer_words = []
         valid_categories = []
         for triple, answer, cat in zip(X, y, categories):
             if all([x in self.embedding_dict for x in triple]) and answer in self.embedding_dict:
@@ -173,8 +182,12 @@ class EmbeddingTaskEvaluator(object):
                 if self.normalize_vects:
                     triple_embedded = sklearn.preprocessing.normalize(triple_embedded)
                 answer_embedded = np.array(self.embedding_dict[answer])
+                triple = [x for x in triple] 
+                if triple in query_words and answer in answer_words:
+                    continue
                 valid_pairs.append((triple_embedded, answer_embedded))
-                word_pairs.append((triple, answer))
+                query_words.append(triple)
+                answer_words.append(answer)
                 valid_categories.append(cat)
 
         if split_type == 'train':
@@ -183,23 +196,28 @@ class EmbeddingTaskEvaluator(object):
         split_point = int(.85 * num_words)
         if split_type == 'train':
             data = valid_pairs[:split_point]
-            word_data = word_pairs[:split_point]
+            query_data = query_words[:split_point]
+            answer_data = answer_words[:split_point]
             category_data = valid_categories[:split_point]
         elif split_type == 'test':
             data = valid_pairs[split_point:]
-            word_data = word_pairs[split_point:]
+            query_data = query_words[split_point:]
+            answer_data = answer_words[split_point:]
             category_data = valid_categories[split_point:]
         else:
             raise ValueError('Unrecognized split type {}'.format(split_type))
-        X = np.array([x[0] for x in data])
+        x1s = np.array([x[0][0] for x in data])
+        x2s = np.array([x[0][1] for x in data])
+        x3s = np.array([x[0][2] for x in data])
         y = np.array([x[1] for x in data])
-        word_X = np.array([x[0] for x in word_data])
-        word_y = np.array([x[1] for x in word_data])
-        if self.normalize_vects:
-            y = sklearn.preprocessing.normalize(y)
-        return X, y, word_X, word_y, category_data
 
-    def _analogy_train_NN(self, X, y, verbose=False):
+        x1s = sklearn.preprocessing.normalize(x1s)
+        x2s = sklearn.preprocessing.normalize(x2s)
+        x3s = sklearn.preprocessing.normalize(x3s)
+        y = sklearn.preprocessing.normalize(y)
+        return x1s, x2s, x3s, y, query_data, answer_data, category_data
+
+    def _train_analogy_NN(self, x1s, x2s, x3s, y, verbose=False):
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
@@ -227,15 +245,22 @@ class EmbeddingTaskEvaluator(object):
                 matmul3s = tf.scan(lambda _, v: tf.matmul(W3, v), v3_e)
                 pred_value = -matmul1s + matmul2s + matmul3s
                 pred_value = tf.squeeze(pred_value)
-                v4_hat = pred_value / tf.sqrt(tf.nn.l2_loss(pred_value) * 2)  # [?, 300]
+                v4_hat = pred_value
+                v4_hat /= tf.sqrt(tf.nn.l2_loss(pred_value) * 2)  # [?, 300]
 
                 losses = tf.reduce_sum(tf.squared_difference(v4, v4_hat), axis=1)
-                loss = tf.reduce_mean(losses)
+                prediction_loss = tf.reduce_mean(losses)
+                loss = prediction_loss
+
+                # regularization
+                reg_param = .001
+                #reg_loss = (1/3) * reg_param * (tf.nn.l2_loss(W1) + tf.nn.l2_loss(W2) + tf.nn.l2_loss(W3)) 
+                reg_loss = reg_param * tf.nn.l2_loss(W3)
+                if True:
+                    loss += reg_loss
 
                 global_step = tf.Variable(0, name='global_step', trainable=False)
                 optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-                #grads_and_vars = optimizer.compute_gradients(loss)
-                #train_op = optimizer.apply_gradients(grads_and_vars, global_step)
                 train_op = optimizer.minimize(loss, global_step)
 
                 sess.run(tf.global_variables_initializer())
@@ -246,30 +271,36 @@ class EmbeddingTaskEvaluator(object):
                 for _ in range(n_iters):
                     if verbose:
                         print('running batches...')
-                    for X_batch, y_batch in zip(chunker(X, 25), chunker(y, 25)):
-                        _, loss_val, step = sess.run([train_op, loss, global_step], feed_dict={
-                            v1: X_batch[:, 0],
-                            v2: X_batch[:, 1],
-                            v3: X_batch[:, 2],
+                    for x1s_batch, x2s_batch, x3s_batch, y_batch in zip(chunker(x1s, 25), chunker(x2s, 25), chunker(x3s, 25), chunker(y, 25)):
+                        _, loss_val, step, p_loss, r_loss = sess.run([train_op, loss, global_step, prediction_loss, reg_loss], feed_dict={
+                            v1: x1s_batch,
+                            v2: x2s_batch,
+                            v3: x3s_batch,
                             v4: y_batch,
                         })
                         if verbose:
                             if step % 20 == 0:
                                 print('loss at step {}: {}'.format(step, loss_val))
+                print('Prediction loss: {:.2f}, Regularization loss: {:.2f} (at end of training)'.format(p_loss, r_loss))
         return sess, W1.eval(sess), W2.eval(sess), W3.eval(sess)
 
     def analogy_tasks(self, train_pct=1.0, verbose=True):
         '''
         Currently not working for any embedding. 
         '''
-        X, y, word_X_train, word_y_train, cats_train = self.get_analogy_data('train')
-        X_test, y_test, word_X_test, word_y_test, categories = self.get_analogy_data('test')
+        x1s, x2s, x3s, y, word_X_train, word_y_train, cats_train = self.get_analogy_data('train', seed=self.seed_bump)
+        x1s_test, x2s_test, x3s_test, y_test, word_X_test, word_y_test, categories = self.get_analogy_data('test', seed=self.seed_bump)
+        print('train_pct: {}'.format(train_pct * 100))
         if verbose:
-            print("{} training words".format(len(X)))
-            print("{} testing words".format(len(X_test)))
-        X = X[:int(train_pct * len(X))]
+            print("{} training words".format(len(x1s)))
+            print("{} testing words".format(len(x1s_test)))
+        same_analogies = [(trip, ans) for (trip, ans) in zip(word_X_test, word_y_test) if trip in word_X_train and ans in word_y_train]
+        assert len(same_analogies) == 0
+        x1s = x1s[:int(train_pct * len(x1s))]
+        x2s = x2s[:int(train_pct * len(x2s))]
+        x3s = x3s[:int(train_pct * len(x3s))]
         y = y[:int(train_pct * len(y))]
-        sess, W1, W2, W3 = self._analogy_train_NN(X, y)
+        sess, W1, W2, W3 = self._train_analogy_NN(x1s, x2s, x3s, y)
         print('learned NN. evaluating...')
 
         correct_syn = 0
@@ -296,10 +327,11 @@ class EmbeddingTaskEvaluator(object):
             ordered_embedding_words.append(word)
             embedding_mat.append(vect)
         embedding_mat = np.array(embedding_mat)  # |V| x k
-        P1 = np.array([x[0] for x in X_test])
-        P2 = np.array([x[1] for x in X_test])
-        P3 = np.array([x[2] for x in X_test])
+        P1 = x1s_test
+        P2 = x2s_test
+        P3 = x3s_test
         predictions = -np.dot(W1, P1.T) + np.dot(W2, P2.T) + np.dot(W3, P3.T)
+        predictions = sklearn.preprocessing.normalize(predictions)
         dots = np.dot(embedding_mat, predictions)
         argmaxes = np.argmax(dots, axis=0)
         predicted_words = [ordered_embedding_words[i] for i in argmaxes]
@@ -319,7 +351,6 @@ class EmbeddingTaskEvaluator(object):
         print('Syntactic Analogy Accuracy: {}'.format(correct_syn / total_syn))
         return (correct_sem / total_sem, correct_syn / total_syn)
 
-    @lru_cache()
     def get_sent_class_data(self, split_type='train'):
         pos_Xy = []
         neg_Xy = []
@@ -351,20 +382,19 @@ class EmbeddingTaskEvaluator(object):
         y_data = [x[1] for x in data]
         return X_data, y_data
 
-    def sentiment_classification_tasks(self, print_score=False):
+    def sentiment_analysis_tasks(self, print_score=False, train_pct=1.0):
         X, y = self.get_sent_class_data('train')
         X_test, y_test = self.get_sent_class_data('test')
-        X = np.array([x.sum(axis=0) for x in X])
+        X = np.array([x.sum(axis=0) for x in X])[:int(train_pct*len(X))]
+        y = y[:int(train_pct*len(y))]
         X_test = np.array([x.sum(axis=0) for x in X_test])
 
+
         classifier = LogisticRegression()
-        t = time.time()
         classifier.fit(X, y)
         score = classifier.score(X_test, y_test)
         if print_score:
             print('Sentiment classification score: {}'.format(score))
-        with open('results/sentiment_class_{}.txt'.format(self.method), 'w') as f:
-            print('Score: {}'.format(score), file=f)
         return score
 
     def outlier_detection(self, verbose=True, n=3):
@@ -399,18 +429,15 @@ class EmbeddingTaskEvaluator(object):
         if verbose:
             print("Scoring...")
         opp, accuracy = score_embedding(embedding, dataset)
-        with open('results/outlier_det_{}.txt'.format(self.method), 'w') as f:
-            print('OPP: {}'.format(opp), file=f)
-            print('Accuracy: {}'.format(accuracy), file=f)
         return opp, accuracy
 
 
 if __name__ == '__main__':
-    method = 'jcp-s_1e-8_reg'
+    method = 'cbow'
     evaluator = EmbeddingTaskEvaluator(method)
-    #evaluator.word_classification_tasks(print_score=True)
+    evaluator.word_classification_tasks(print_score=True)
     evaluator.analogy_tasks()
     sys.exit()
     #score = evaluator.outlier_detection()
-    evaluator.sentiment_classification_tasks(print_score=True)
+    evaluator.sentiment_analysis_tasks(print_score=True)
 

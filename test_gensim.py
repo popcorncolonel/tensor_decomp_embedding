@@ -27,11 +27,11 @@ stopwords = stopwords.union(grammar_stopwords)
 
 
 class GensimSandbox(object):
-    def __init__(self, method, embedding_dim, num_sents, min_count, gpu=True):
+    def __init__(self, method, embedding_dim, num_articles, min_count, gpu=True):
         self.method = method
         self.embedding_dim = int(embedding_dim)
         self.min_count = int(min_count)
-        self.num_sents = int(num_sents)
+        self.num_articles = int(num_articles)
         self.gpu = gpu
         if '--buildvocab' in sys.argv:
             self.buildvocab = True
@@ -44,7 +44,30 @@ class GensimSandbox(object):
         self.embedding = None
         self.to_save = {}
 
-    def sentences_generator(self, num_sents=None):
+    def sentences_generator(self, num_articles=None):
+        if num_articles is None:
+            num_articles = self.num_articles
+        gzipped_wiki = '/home/eric/code/enwiki-latest-pages-articles.xml.bz2'
+        wiki = gensim.corpora.wikicorpus.WikiCorpus(gzipped_wiki, dictionary={})
+        articles = wiki.get_texts()
+        n_tokens = 0
+        count = 0
+        for article in articles:
+            if count % int(num_articles / 10) == 0:
+                print("Just hit article {} out of {} ({}%)".format(count, num_articles, 100*count / num_articles))
+            article = [x.decode('utf8') for x in article if x not in stopwords]
+            if count < num_articles:
+                n_tokens += len(article)
+                count += 1
+                yield article
+            else:
+                break
+        print("avg article word length: {}".format(n_tokens / count))
+        print("{} total tokens".format(n_tokens))
+        print("num articles: {}".format(count))
+        raise StopIteration
+
+    def sentences_generator_tokenized(self, num_sents=None):
         if num_sents is None:
             num_sents = self.num_sents
         tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # already has stopwords and hawaiian removed
@@ -64,7 +87,7 @@ class GensimSandbox(object):
                     raise StopIteration
 
     def get_model_with_vocab(self, fname='wikimodel'):
-        fname += '_{}_{}'.format(self.num_sents, self.min_count)
+        fname += '_{}_{}'.format(self.num_articles, self.min_count)
         model = gensim.models.Word2Vec(
             iter=1,
             max_vocab_size=None,
@@ -111,11 +134,10 @@ class GensimSandbox(object):
         sess = tf.Session(config=config)
         with sess.as_default():
             U = tf.Variable(self.embedding, name='U')
-            sparse_U = tf.nn.relu(U, name='Sparse_U')
             print('creating saver for embedding viz...')
             saver = tf.train.Saver()
 
-        LOG_DIR = 'tf_logs/{}_{}_{}'.format(self.method, self.num_sents, self.min_count)
+        LOG_DIR = 'tf_logs/{}_{}_{}'.format(self.method, self.num_articles, self.min_count)
         LOG_DIR = os.path.join(LOG_DIR, 'embedding_viz')
         print('Saving embeddings to {}...'.format(LOG_DIR))
         if not os.path.exists(LOG_DIR): os.makedirs(LOG_DIR)
@@ -154,9 +176,8 @@ class GensimSandbox(object):
 
     def get_pmi_gatherer(self, n):
         gatherer = None
-        count_sents = self.num_sents
-        if os.path.exists('gatherer_{}_{}_{}.pkl'.format(count_sents, self.min_count, n)):
-            with open('gatherer_{}_{}_{}.pkl'.format(count_sents, self.min_count, n), 'rb') as f:
+        if os.path.exists('gatherer_{}_{}_{}.pkl'.format(self.num_articles, self.min_count, n)):
+            with open('gatherer_{}_{}_{}.pkl'.format(self.num_articles, self.min_count, n), 'rb') as f:
                 t = time.time()
                 import gc; gc.disable()
                 gatherer = dill.load(f)
@@ -164,14 +185,14 @@ class GensimSandbox(object):
                 print('Loading gatherer took {} secs'.format(time.time() - t))
         else:
             # batch_size doesn't matter. But higher is probably better (in terms of threading & speed)
-            batches = batch_generator2(self.model, self.sentences_generator(num_sents=count_sents), batch_size=1000)
+            batches = batch_generator2(self.model, self.sentences_generator(num_articles=self.num_articles), batch_size=1000)
             gatherer = PMIGatherer(self.model, n=n)
-            if count_sents <= 1e6:
+            if self.num_articles <= 1e4:
                 gatherer.populate_counts(batches, huge_vocab=False)
             else:
                 gatherer.populate_counts(batches, huge_vocab=True, min_count=5)
 
-            with open('gatherer_{}_{}_{}.pkl'.format(count_sents, self.min_count, n), 'wb') as f:
+            with open('gatherer_{}_{}_{}.pkl'.format(self.num_articles, self.min_count, n), 'wb') as f:
                 t = time.time()
                 import gc; gc.disable()
                 dill.dump(gatherer, f)
@@ -185,7 +206,7 @@ class GensimSandbox(object):
         shifts = [-np.log2(s) for s in exp_shifts]
 
         def sparse_tensor_batches(batch_size=1000):
-            batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
+            batches = batch_generator2(self.model, self.sentences_generator(num_articles=self.num_articles), batch_size=batch_size)
             for batch in batches:
                 pairlist = [
                     gatherer.create_pmi_tensor(
@@ -238,7 +259,7 @@ class GensimSandbox(object):
             shift = -np.log2(15.)
 
         def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
-            batches = batch_generator2(self.model, self.sentences_generator(num_sents=self.num_sents), batch_size=batch_size)
+            batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
             for batch in batches:
                 sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
                     batch=batch,
@@ -269,7 +290,8 @@ class GensimSandbox(object):
                 # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
                 mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
                 reg_param = mean / 100.  # ...heuristic
-                reg_param = 1e-6
+                #reg_param = 1e-6
+                reg_param = 0
                 self.to_save['reg_param'] = reg_param
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
@@ -280,7 +302,7 @@ class GensimSandbox(object):
                     optimizer_type='adam',
                     reg_param=reg_param,
                     nonneg=nonneg,
-                    gpu=False,
+                    gpu=True,
                     mean_value=mean_value,
                 )
             else:
@@ -336,8 +358,11 @@ class GensimSandbox(object):
         self.to_save['indices'] = indices
         self.to_save['values'] = values
 
-    def train_random_embedding(self):
-        self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - .5) * 2
+    def train_random_embedding(self, gauss=False):
+        if gauss:
+            self.embedding = np.random.normal(0, .5, size=(len(self.model.vocab), self.embedding_dim))
+        else:
+            self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - .5) * 2
 
     def train_save_sp_tensor(self, pmi=True):
         gatherer = self.get_pmi_gatherer(3)
@@ -346,45 +371,11 @@ class GensimSandbox(object):
         else:
             print('creating sparse count tensor...')
         indices, values = gatherer.create_pmi_tensor(positive=True, debug=True, symmetric=False, pmi=pmi, shift=-np.log2(15.))
-        matfile_name = 'sp_tensor_{}_{}_log15.mat'.format(self.num_sents, self.min_count)
+        matfile_name = 'sp_tensor_{}_{}_log15.mat'.format(self.num_articles, self.min_count)
         scipy.io.savemat(matfile_name, {'indices': indices, 'values': values})
         print('saved {}. exiting.'.format(matfile_name))
         sys.exit()
 
-        from pymatbridge import Matlab
-        session = Matlab('/usr/local/bin/matlab')
-        print('starting matlab session...')
-        session.start()
-        #session.set_variable('indices', indices+1)
-        #session.set_variable('vals', values)
-
-        print('setting up variables...')
-        session.run_code("d = load('/home/eric/code/gensim/sp_tensor.mat');")
-        session.run_code("indices = d.indices + 1;")
-        session.run_code("vals = d.values';")
-        #session.run_code('size_ = [{0} {0} {0}];'.format(len(self.model.vocab)))
-        session.run_code('size_ = [{0} {0} {0}];'.format(8))
-        session.run_code('R = {};'.format(self.embedding_dim))
-        import pdb; pdb.set_trace()
-        res = session.run_code("T = sptensor(indices, vals, size_);")
-        print('running ALS...')
-        t = time.time()
-        res = session.run_code('[P, U0, out] = cp_als(T, R)')
-        print('ALS took {} secs'.format(time.time() - t))
-        session.run_code('lambda = P.lambda;')
-        session.run_code('U = P{1,1};')
-        session.run_code('V = P{2,1};')
-        session.run_code('W = P{3,1};')
-        lambda_ = session.get_variable('lambda')
-        U = session.get_variable('U')
-        import pdb; pdb.set_trace()
-        '''
-        print('saving .mat file')
-        scipy.io.savemat('sp_tensor.mat', {'indices': indices, 'values': values})
-        print('saved .mat file')
-        sys.exit()
-        '''
-        
     def restore_from_ckpt(self):
         config = tf.ConfigProto(allow_soft_placement=True)
         with tf.Session(config=config) as sess:
@@ -460,21 +451,13 @@ class GensimSandbox(object):
         evaluate(self.embedding, self.method, self.model)
         evaluator = EmbeddingTaskEvaluator(self.method)
         evaluator.word_classification_tasks(print_score=True)
-        evaluator.sentiment_classification_tasks(print_score=True)
+        evaluator.sentiment_analysis_tasks(print_score=True)
         evaluator.outlier_detection()
         evaluator.analogy_tasks()
-        #evaluator.sent_classification_tasks()
-
-    def test_embedding_evaluation(self):
-        #evaluate(self.embedding, self.method, self.model)
-        evaluator = EmbeddingTaskEvaluator(self.method)
-        #evaluator.word_classification_tasks()
-        #evaluator.analogy_tasks()
-        evaluator.sent_classification_tasks()
 
     def save_metadata(self):
         grandparent_dir = os.path.abspath('runs/{}'.format(self.method))
-        parent_dir = grandparent_dir + '/' + '{}_{}_{}'.format(self.num_sents, self.min_count, self.embedding_dim)
+        parent_dir = grandparent_dir + '/' + '{}_{}_{}'.format(self.num_articles, self.min_count, self.embedding_dim)
         if not os.path.exists(grandparent_dir):
             os.mkdir(grandparent_dir)
         if not os.path.exists(parent_dir):
@@ -484,6 +467,7 @@ class GensimSandbox(object):
             f.write('Evaluation time: {}\n'.format(timestamp))
             f.write('Vocab size: {}\n'.format(len(self.model.vocab)))
             f.write('Elapsed training time: {}\n'.format(time.time() - self.start_time))
+            print('Elapsed training time: {}\n'.format(time.time() - self.start_time))
         write_embedding_to_file(self.embedding, self.model, parent_dir + '/vectors.txt')
         try:
             shutil.copyfile('/home/eric/code/gensim/results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
@@ -521,7 +505,8 @@ class GensimSandbox(object):
             print("experiment name: {}".format(experiment[1:]))
 
         if self.method in ['random']:
-            self.train_random_embedding()
+            self.method += experiment
+            self.train_random_embedding(gauss=True)
         elif self.method in ['cp']:  # Basic CP Decomp (from matlab)
             self.method += experiment
             self.loadmatlab()
@@ -570,19 +555,19 @@ class GensimSandbox(object):
 
 def main():
     method = None
-    num_sents = None
+    num_articles = None
     min_count = None
     embedding_dim = None
     for arg in sys.argv:
         if arg.startswith('--method='):
             method = arg.split('--method=')[1]
-        if arg.startswith('--num_sents='):
-            num_sents = float(arg.split('--num_sents=')[1])
+        if arg.startswith('--num_articles='):
+            num_articles = float(arg.split('--num_articles=')[1])
         if arg.startswith('--min_count='):
             min_count = float(arg.split('--min_count=')[1])
         if arg.startswith('--embedding_dim='):
             embedding_dim = int(arg.split('--embedding_dim=')[1])
-    assert all([method, num_sents, min_count, embedding_dim]), 'Please supply all necessary parameters'
+    assert all([method, num_articles, min_count, embedding_dim]), 'Please supply all necessary parameters'
 
     def input_with_timeout(prompt, timeout):
         sys.stdout.write(prompt)
@@ -591,15 +576,16 @@ def main():
         if ready:
             return sys.stdin.readline().rstrip('\n') # expect stdin to be line-buffered
         return ''
-    experiment = input_with_timeout(
-        "Enter an experiment name (or press enter for no specific experiment): ",
-        30.0,  # timeout of 30sec
-    )
-    print('Creating sandbox with method {}, num_sents {} and min_count {}.'.format(method, num_sents, min_count))
+    experiment = ''
+    #experiment = input_with_timeout(
+    #    "Enter an experiment name (or press enter for no specific experiment): ",
+    #    30.0,  # timeout of 30sec
+    #)
+    print('Creating sandbox with method {}, num_articles {} and min_count {}.'.format(method, num_articles, min_count))
 
     sandbox = GensimSandbox(
         method=method,
-        num_sents=num_sents,
+        num_articles=num_articles,
         embedding_dim=embedding_dim,
         min_count=min_count,
     )

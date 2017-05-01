@@ -1,5 +1,5 @@
 # Tensor Decomp Embedding
-Code for the paper [Word Embedding via Tensor Decomposition](TODO). 
+Code for the paper [Word Embedding via Tensor Decomposition](https://arxiv.org/abs/1704.02686). 
 
 This project is implemented in Python 3 only. 
 

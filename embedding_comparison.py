@@ -10,7 +10,7 @@ import sys
 from embedding_evaluation import EmbeddingTaskEvaluator, evaluate_vectors_from_path
 
 class EmbeddingComparison(object):
-    def __init__(self, num_sents, min_count, methods, comparison_name, embedding_dim=None, embedding_dim_list=None, normalize=False):
+    def __init__(self, num_sents, min_count, methods, comparison_name, embedding_dim=None, embedding_dim_list=None, normalize=True):
         '''
         `methods` is a list of strings
         `num_sents`, `embedding_dim`, and `min_count` are passed in uniformly for a more fair comparison (we should be evaluating on the exact same test suite, the
@@ -32,7 +32,7 @@ class EmbeddingComparison(object):
             fname = 'runs/{method}/{num_sents}_{min_count}_{dim}/vectors.txt'.format(**locals())
             if diff_dims:
                 method += '_{}'.format(dim)
-            self.evaluators.append(EmbeddingTaskEvaluator(method=method, fname=fname, nonneg=True))
+            self.evaluators.append(EmbeddingTaskEvaluator(method=method, fname=fname, normalize_vects=normalize))
         self.vocab_set = set(self.evaluators[0].embedding_dict.keys())
 
     def print_method(self, method):
@@ -102,25 +102,24 @@ class EmbeddingComparison(object):
         all_results = pd.concat(frames)
         return all_results
 
-    def compare_word_classification(self):
+    def compare_word_classification(self, train_pct=1.0):
         print("\n==================================")
         score_dict = {}
         for evaluator in self.evaluators:
             self.print_method(evaluator.method)
-            score = evaluator.word_classification_tasks()
-            print("Word classification score: {}".format(score))
+            score = evaluator.word_classification_tasks(classification_problem='PoS', train_pct=train_pct)
+            print("PoS classification ({}) score: {}".format(int(train_pct*100), score))
             method = evaluator.method
             score_dict[method] = score
         return score_dict
 
-    def compare_sentiment_classification(self):
+    def compare_sentiment_analysis(self, train_pct=1.0):
         print("\n==================================")
-        # TODO: multithread this
         score_dict = {}
         for evaluator in self.evaluators:
             self.print_method(evaluator.method)
-            score = evaluator.sentiment_classification_tasks()
-            print("Sentiment classification score: {}".format(score))
+            score = evaluator.sentiment_analysis_tasks(train_pct=train_pct)
+            print("Sentiment classification ({}%) score: {}".format(train_pct*100.0, score))
             method = evaluator.method
             score_dict[method] = score
         return score_dict
@@ -196,43 +195,72 @@ class EmbeddingComparison(object):
             for evaluator in self.evaluators:
                 evaluator.seed_bump = run_index
 
-            self.compare_coherency(n=3)
-            words = random.sample(list(self.vocab_set), 3)
-            self.compare_nearest_neighbors(words)
-            self.compare_word_dimensions(words)
+            # qualitative
+            #self.compare_coherency(n=3)
+            #words = random.sample(list(self.vocab_set), 5)
+            #self.compare_nearest_neighbors(words)
+            #self.compare_word_dimensions(words)
 
+            # quantitative
             # this should be fastest to slowest
-            sentiment_classification_results = self.compare_sentiment_classification()
-            word_class_results = self.compare_word_classification()
+            sentiment_analysis_10_results = self.compare_sentiment_analysis(train_pct=.1)
+            sentiment_analysis_30_results = self.compare_sentiment_analysis(train_pct=.3)
+            sentiment_analysis_50_results = self.compare_sentiment_analysis(train_pct=.5)
+            sentiment_analysis_results = self.compare_sentiment_analysis()
+
+            '''
+            word_class_10_results = self.compare_word_classification(train_pct=.1)
+            word_class_30_results = self.compare_word_classification(train_pct=.3)
+            word_class_50_results = self.compare_word_classification(train_pct=.5)
+            word_class_results = self.compare_word_classification(train_pct=1.0)
+
             outlier_det2_opps, outlier_det2_accs = self.compare_outlier_detection(n=2)
             outlier_det3_opps, outlier_det3_accs = self.compare_outlier_detection(n=3)
-            analogy_sem_results_10, analogy_syn_results_10 = self.compare_analogy(.10)
+
+            analogy_sem_results_10, analogy_syn_results_10 = self.compare_analogy(.1)
             analogy_sem_results_30, analogy_syn_results_30 = self.compare_analogy(.3)
             analogy_sem_results_50, analogy_syn_results_50 = self.compare_analogy(.5)
             analogy_sem_results, analogy_syn_results = self.compare_analogy(1.0)
-            result_name_pairs = [
+
                 (analogy_sem_results_10, 'Analogy 10% (sem)'),
-                (analogy_syn_results_10, 'Analogy 10% (syn)'),
                 (analogy_sem_results_30, 'Analogy 30% (sem)'),
-                (analogy_syn_results_30, 'Analogy 30% (syn)'),
                 (analogy_sem_results_50, 'Analogy 50% (sem)'),
+                (analogy_sem_results, 'Analogy 100% (sem)'),
+
+                (analogy_syn_results_10, 'Analogy 10% (syn)'),
+                (analogy_syn_results_30, 'Analogy 30% (syn)'),
                 (analogy_syn_results_50, 'Analogy 50% (syn)'),
-                (analogy_sem_results, 'Analogy (sem)'),
-                (analogy_syn_results, 'Analogy (syn)'),
-                (sentiment_classification_results, 'Sentiment analysis'), 
-                (word_class_results, 'Word classification'), 
+                (analogy_syn_results, 'Analogy 100% (syn)'),
+            '''
+
+            result_name_pairs = [
+                (sentiment_analysis_10_results, 'Sentiment analysis (10%)'), 
+                (sentiment_analysis_30_results, 'Sentiment analysis (30%)'), 
+                (sentiment_analysis_50_results, 'Sentiment analysis (50%)'), 
+                (sentiment_analysis_results, 'Sentiment analysis (100%)'), 
+            ]
+
+            '''
+                (word_class_10_results, 'PoS classification (10%)'), 
+                (word_class_30_results, 'PoS classification (30%)'), 
+                (word_class_50_results, 'PoS classification (50%)'), 
+                (word_class_results, 'PoS classification (100%)'), 
+
                 (outlier_det2_opps, 'OD2 OPP'), 
                 (outlier_det2_accs, 'OD2 acc'), 
                 (outlier_det3_opps, 'OD3 OPP'), 
                 (outlier_det3_accs, 'OD3 acc'), 
-            ]
+            '''
             df = pd.DataFrame([ d for (d, name) in result_name_pairs ])
             df.index = [ name for (d, name) in result_name_pairs ]
             df = df.transpose()
 
-            web_results = self.compare_web()
-            all_df = web_results.join(df)
-            all_df = all_df.transpose()  # excel likes it better this way
+            if False:
+                web_results = self.compare_web()
+                all_df = web_results.join(df)
+                all_df = all_df.transpose()  # excel likes it better this way
+            else:
+                all_df = df.transpose()
 
             all_dfs.append(all_df)
 
@@ -260,11 +288,11 @@ if __name__ == '__main__':
     embedding_dim_list = None
     if comparison_name == '10e6':
         num_sents = int(10e6)
-        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s_log15', 'cp-sn', 'jcp-s', 'jcp-s_equalweights']
+        methods = ['random_gauss', 'cbow', 'nnse', 'cp_log15', 'cp-s_log15', 'cp-sn', 'jcp-s']
         embedding_dim = 300
     elif comparison_name == 'shifted':
         num_sents = int(10e6)
-        methods = ['cp-s'] + ['cp-s_log{}'.format(i) for i in [5, 10, 15, 20, 25]]
+        methods = ['cp', 'cp_log15', 'cp-s'] + ['cp-s_log{}'.format(i) for i in [5, 10, 15, 20, 25]]
         embedding_dim = 300
     elif comparison_name == 'jcp-s':
         num_sents = int(10e6)
@@ -280,7 +308,7 @@ if __name__ == '__main__':
         embedding_dim = 300
     elif comparison_name == 'test':
         num_sents = int(10e6)
-        methods = ['cbow', 'cp-s', 'cp-sn', 'jcp-s', 'jcp-s_432']
+        methods = ['cbow', 'cp-s']
         embedding_dim = 300
     min_count = 2000
     comparator = EmbeddingComparison(
@@ -295,7 +323,7 @@ if __name__ == '__main__':
     # Don't really need num runs because most of these methods aren't even stochastic (wordsim, etc)
     #comparator.compare_outlier_detection(2)
     #comparator.compare_outlier_detection(3)
-    #comparator.compare_analogy(.1)
+    #comparator.compare_analogy(1.0)
     #sys.exit()
-    comparator.compare_all()
+    comparator.compare_all(num_runs=5)
 
