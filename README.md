@@ -19,4 +19,9 @@ To compare a list of embeddings trained via the Makefile, modify the end of embe
 A generic framework for online CP decomposition implemented in TensorFlow can be found in tensor_decomp.py. Included is also Joint Symmetric CP Decomposition, described in the paper. 
 
 ## BibTeX
-TODO
+    @misc{1704.02686,
+    Author = {Eric Bailey and Shuchin Aeron},
+    Title = {Word Embeddings via Tensor Factorization},
+    Year = {2017},
+    Eprint = {arXiv:1704.02686},
+    }
