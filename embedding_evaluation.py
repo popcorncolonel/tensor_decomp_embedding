@@ -6,7 +6,7 @@ import sys
 import tensorflow as tf
 import time
 
-from functools import lru_cache
+from gensim.models import word2vec
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 
@@ -55,11 +55,11 @@ def evaluate(embedding, method, model):
     print('done evaluating {}.'.format(method))
 
 def evaluate_vectors_from_path(vector_path, results_path):
-    os.system('python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(vector_path, results_path))
+    os.system('python3 embedding_benchmarks/scripts/evaluate_on_all.py -f {} -o results/{}'.format(vector_path, results_path))
 
 
 class EmbeddingTaskEvaluator(object):
-    def __init__(self, method: str, fname: str=None, normalize_vects: bool=True, nonneg: bool=False, seed_bump=0):
+    def __init__(self, method: str, fname: str=None, normalize_vects: bool=True, nonneg: bool=False, seed_bump=0, embedding_format='normal'):
         '''
         `fname` is the name of an embedding vectors file 
         '''
@@ -83,7 +83,6 @@ class EmbeddingTaskEvaluator(object):
         self.seed_bump = seed_bump
         random.seed(42 + self.seed_bump)
 
-    #@lru_cache()
     def get_word_classification_data_pos(self, split_type='train'):
         words_and_POSs = []
         with open('evaluation_data/pos.txt') as f:
@@ -111,7 +110,6 @@ class EmbeddingTaskEvaluator(object):
             X = sklearn.preprocessing.normalize(X)
         return X, y
 
-    #@lru_cache()
     def get_word_classification_data_emotions(self, split_type='train'):
         words_and_emotions = []
         with open('evaluation_data/emotions.txt') as f:
@@ -152,14 +150,12 @@ class EmbeddingTaskEvaluator(object):
         y = y[:int(len(y) * train_pct)]
 
         classifier = LogisticRegression()
-        #classifier = MLPClassifier(hidden_layer_sizes=(100, 42))
         classifier.fit(X, y)
         score = classifier.score(X_test, y_test)
         if print_score:
             print('Word classification ({}, {}%) score: {}'.format(classification_problem, int(train_pct*100), score))
         return score
 
-    @lru_cache()
     def get_analogy_data(self, split_type='train', seed=0):
         from embedding_benchmarks.scripts.web.datasets.analogy import fetch_google_analogy
         analogy = fetch_google_analogy()
@@ -351,7 +347,7 @@ class EmbeddingTaskEvaluator(object):
         print('Syntactic Analogy Accuracy: {}'.format(correct_syn / total_syn))
         return (correct_sem / total_sem, correct_syn / total_syn)
 
-    def get_sent_class_data(self, split_type='train'):
+    def get_sent_class_data_old(self, split_type='train'):
         pos_Xy = []
         neg_Xy = []
         pos_dir = 'evaluation_data/sentiment/pos/'
@@ -380,6 +376,36 @@ class EmbeddingTaskEvaluator(object):
         tokenized_X = [x[0].split() for x in data]
         X_data = [np.array([self.embedding_dict[w] for w in sent if w in self.embedding_dict]) for sent in tokenized_X]
         y_data = [x[1] for x in data]
+        return X_data, y_data
+
+    def get_sent_class_data(self, split_type='train'):
+        pos_Xy = []
+        neg_Xy = []
+        if split_type in ['train', 'test']:
+            fix_sent = lambda s: s.replace('<br />', '').replace(',', '').replace('.', '').replace('"', '').replace("'", '').replace('!', '').replace('?', '').replace('/', ' ').replace('(', '').replace(')', '')
+            pos_dir = 'aclImdb/{}/pos/'.format(split_type)
+            for fname in os.listdir(pos_dir):
+                with open(pos_dir + fname, 'r') as f:
+                    contents = [x.strip().lower() for x in f]
+                all_words = ' '.join(contents)
+                all_words = fix_sent(all_words)
+                pos_Xy.append((all_words, True))
+            neg_dir = 'aclImdb/{}/neg/'.format(split_type)
+            for fname in os.listdir(neg_dir):
+                with open(neg_dir + fname, 'r') as f:
+                    contents = [x.strip().lower() for x in f]
+                all_words = ' '.join(contents)
+                all_words = fix_sent(all_words)
+                neg_Xy.append((all_words, False))
+        else:
+            raise ValueError('Unrecognized split type {}'.format(split_type))
+        all_data = pos_Xy + neg_Xy
+        random.seed(42 + self.seed_bump)
+        random.shuffle(all_data)
+
+        tokenized_X = [x[0].split() for x in all_data]
+        X_data = [np.array([self.embedding_dict[w] for w in sent if w in self.embedding_dict]) for sent in tokenized_X]
+        y_data = [x[1] for x in all_data]
         return X_data, y_data
 
     def sentiment_analysis_tasks(self, print_score=False, train_pct=1.0):
@@ -438,6 +464,4 @@ if __name__ == '__main__':
     evaluator.word_classification_tasks(print_score=True)
     evaluator.analogy_tasks()
     sys.exit()
-    #score = evaluator.outlier_detection()
-    evaluator.sentiment_analysis_tasks(print_score=True)
 

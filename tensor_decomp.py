@@ -21,7 +21,6 @@ class CPDecomp(object):
         with tf.device('/gpu:0'):
             # t-th batch tensor
             # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
-            #self.X_t = tf.sparse_placeholder(tf.float32, shape=np.array(shape, dtype=np.int64))
             self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')
             self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
             shape_sparse = np.array(self.shape, dtype=np.int64)
@@ -50,10 +49,10 @@ class CPDecomp(object):
         `X` is the actual representation of `X_hat`. We return the RMSE between X_hat and X
         returns sqrt(1/#entries * sum_{entry} (X_{entry} - X_hat_{entry})^2
 
-        WARNING: could use a lotta memory
+        WARNING: could use a lot of memory
         '''
 
-        # X_hat ~= U x1 V x2 W - right?
+        # X_hat ~= U x1 V x2 W
         X_hat = tf.einsum('ir,jr,kr->ijk', self.U, self.V, self.W)
         tf_X = tf.constant(X, dtype=tf.float32)
         rmse = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, tf_X))))
@@ -78,7 +77,6 @@ class CPDecomp(object):
             [
                 self.train_ops, # might need multiple train ops to be executed sequentially (see the case of sals)
                 self.global_step,
-                #self.D1, self.D2, self.D3, self.grad_value_U, self.grad_value_V, self.grad_value_W, 
             ],
             feed_dict=feed_dict,
         )
@@ -101,16 +99,12 @@ class CPDecomp(object):
                 feed_dict=feed_dict,
             )
             #print('getting loss took {} secs'.format(time.time() - t))
-            #if self.write_loss:
-            #    self.train_summary_writer.add_summary(loss_summary, step)
 
             batch_time = (time.time() - self.prev_time) / print_every
             print("Err at step {}: {}; reg loss: {} (avg batch time: {})".format(step, err, reg, batch_time))
             self.prev_time = time.time()
             self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
-            #print("avg time (per batch, overall): {}".format(self.avg_time))
             self.total_recordings += 1
-            #print("self.U: ", self.U.eval())
         
     def create_loss_fn(self, reg_param):
         """
@@ -122,7 +116,7 @@ class CPDecomp(object):
             X is a sparse tensor. U,V,W are dense. 
             """
             predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.V, x[1]) * tf.gather(self.W, x[2]))
-            predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=False)  # elementwise ops are slow as heck. and yet storing all the vects in memory is infeasible. Could try fitting the whole thing in memory just on GPU 1 or something, but it might just not fit. 3*N*R = too much? at what point is it too much?
+            predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=False)
             errs = tf.squared_difference(predicted_vals, X.values)
             return tf.reduce_mean(errs)
 
@@ -339,7 +333,6 @@ def test_decomp():
                 values = np.asarray(values)
                 print('{} nonzero vals'.format(len(indices)))
                 yield (indices, values)
-                #yield tf.SparseTensorValue(indices, values, X_t.shape)
 
     config = tf.ConfigProto(
         allow_soft_placement=True,
@@ -402,7 +395,7 @@ class SymmetricCPDecomp(object):
         `X` is the actual representation of `X_hat`. We return the RMSE between X_hat and X
         returns sqrt(1/#entries * sum_{entry} (X_{entry} - X_hat_{entry})^2
 
-        WARNING: could use a lotta memory
+        WARNING: could use a lot of memory
         '''
 
         # X_hat ~= sum_{r=1}^{R} U_r \circ ... \circ U_r
@@ -499,14 +492,6 @@ class SymmetricCPDecomp(object):
         else:
             self.reg = tf.constant(0.0)
         self.loss = self.L + self.reg
-        '''
-        if self.non neg:
-            #self.loss += tf.reduce_sum(tf.abs(self.U) - self.U)
-            #subzero_indices = tf.where(self.U < 0) 
-            #self.loss += -tf.minimum(tf.reduce_sum(tf.gather(self.U, subzero_indices)), 0)
-            #self.loss += 25 * -tf.minimum(tf.reduce_min(self.U), 0)
-            pass
-        '''
         
     def get_train_ops(self):
         train_ops = [self.get_train_op_adam()]
@@ -734,7 +719,6 @@ def test_symmetric_decomp():
         import random
         for _ in range(5000):
             values = vals + np.random.rand(len(vals)) - 0.5
-            #print('{} nonzero vals'.format(len(indices)))
             yield (indices, values)
 
     config = tf.ConfigProto(
@@ -775,7 +759,6 @@ def test_joint_decomp():
         import random
         for _ in range(5000):
             values = vals + np.random.rand(len(vals)) - 0.5
-            #print('{} nonzero vals'.format(len(indices)))
             yield ([indices2, indices3], [values, values])
 
     config = tf.ConfigProto(

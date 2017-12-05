@@ -233,8 +233,6 @@ class WordEmbedding(object):
             )
             sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
 
-            #losses = self.create_exponential_loss(fc_W, fc_b, sampled_candidates)
-
             losses = tf.nn.nce_loss(
             #losses=tf.nn.sampled_softmax_loss(
                 weights=fc_W,
@@ -298,7 +296,7 @@ class WordEmbedding(object):
         time_str = datetime.datetime.now().isoformat()
         print("(dev) {}: step {}, loss {:g}".format(time_str, self.step, loss))
         self.dev_summary_writer.add_summary(summaries, self.step)
-        self.evaluate()
+        #self.evaluate()
 
     def evaluate(self, rel_path='vectors.txt'):
         self.write_embedding_to_file(fname=rel_path)
@@ -353,5 +351,5 @@ class WordEmbedding(object):
             current_step = tf.train.global_step(self.sess, self.global_step)
         path = self.saver.save(self.sess, checkpoint_prefix, global_step=tf.train.global_step(self.sess, self.global_step))
         print('Saved FINAL model checkpoint to {}'.format(path))
-        self.evaluate()
+        #self.evaluate()
 

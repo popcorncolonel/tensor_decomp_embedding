@@ -1,4 +1,3 @@
-#import _pickle as pickle  # python 3's cPickle
 import datetime
 import dill
 import gensim
@@ -14,7 +13,8 @@ import sys
 import time
 import tensorflow as tf
 
-from embedding_evaluation import write_embedding_to_file, evaluate, EmbeddingTaskEvaluator
+#from embedding_evaluation import write_embedding_to_file, evaluate, EmbeddingTaskEvaluator
+from embedding_evaluation import write_embedding_to_file, EmbeddingTaskEvaluator
 from gensim_utils import batch_generator, batch_generator2
 from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp, SymmetricCPDecomp, JointSymmetricCPDecomp
@@ -33,10 +33,6 @@ class GensimSandbox(object):
         self.min_count = int(min_count)
         self.num_articles = int(num_articles)
         self.gpu = gpu
-        if '--buildvocab' in sys.argv:
-            self.buildvocab = True
-        else:
-            self.buildvocab = False
 
         # To be assigned later
         self.model = None
@@ -47,7 +43,7 @@ class GensimSandbox(object):
     def sentences_generator(self, num_articles=None):
         if num_articles is None:
             num_articles = self.num_articles
-        gzipped_wiki = '/home/eric/code/enwiki-latest-pages-articles.xml.bz2'
+        gzipped_wiki = '../enwiki-latest-pages-articles.xml.bz2'
         wiki = gensim.corpora.wikicorpus.WikiCorpus(gzipped_wiki, dictionary={})
         articles = wiki.get_texts()
         n_tokens = 0
@@ -67,25 +63,6 @@ class GensimSandbox(object):
         print("num articles: {}".format(count))
         raise StopIteration
 
-    def sentences_generator_tokenized(self, num_sents=None):
-        if num_sents is None:
-            num_sents = self.num_sents
-        tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # already has stopwords and hawaiian removed
-        count = 0
-        n_tokens = 0
-        with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
-            for line in f:
-                if count % int(num_sents / 10) == 0 and count > 0:
-                    print("Just hit sentence {} out of {} ({}%)".format(count, num_sents, 100*count / num_sents))
-                if count < num_sents:
-                    count += 1
-                    sent = line.rstrip().split()
-                    n_tokens += len(sent)
-                    yield sent
-                else:
-                    print("{} total tokens".format(n_tokens))
-                    raise StopIteration
-
     def get_model_with_vocab(self, fname='wikimodel'):
         fname += '_{}_{}'.format(self.num_articles, self.min_count)
         model = gensim.models.Word2Vec(
@@ -95,7 +72,7 @@ class GensimSandbox(object):
             size=self.embedding_dim,
             min_count=self.min_count,
         )
-        if self.buildvocab or not os.path.exists(fname):
+        if not os.path.exists(fname):
             print('building vocab...')
             model.build_vocab(self.sentences_generator())
             with open(fname, 'wb') as f:
@@ -120,12 +97,6 @@ class GensimSandbox(object):
         print('Finished building vocab. length of vocab: {}'.format(len(model.vocab)))
         self.model = model
         return self.model
-
-    def list_vars_in_checkpoint(self, dirname):
-        ''' Just for tf debugging.  '''
-        from tensorflow.contrib.framework.python.framework.checkpoint_utils import list_variables
-        abspath = os.path.abspath(dirname)
-        return list_variables(abspath)
 
     def create_embedding_visualization(self):
         config = tf.ConfigProto(
@@ -289,8 +260,7 @@ class GensimSandbox(object):
                 # reg_param should be set so that initial reg. loss is about 1.0
                 # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
                 mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
-                reg_param = mean / 100.  # ...heuristic
-                #reg_param = 1e-6
+                #reg_param = mean / 100.
                 reg_param = 0
                 self.to_save['reg_param'] = reg_param
                 print('reg_param: {}'.format(reg_param))
@@ -448,7 +418,7 @@ class GensimSandbox(object):
         self.embedding = embedding_model.get_embedding_matrix()
 
     def evaluate_embedding(self):
-        evaluate(self.embedding, self.method, self.model)
+        #evaluate(self.embedding, self.method, self.model)
         evaluator = EmbeddingTaskEvaluator(self.method)
         evaluator.word_classification_tasks(print_score=True)
         evaluator.sentiment_analysis_tasks(print_score=True)
@@ -470,14 +440,14 @@ class GensimSandbox(object):
             print('Elapsed training time: {}\n'.format(time.time() - self.start_time))
         write_embedding_to_file(self.embedding, self.model, parent_dir + '/vectors.txt')
         try:
-            shutil.copyfile('/home/eric/code/gensim/results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
-            shutil.copyfile('/home/eric/code/gensim/results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
+            shutil.copyfile('../results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
+            shutil.copyfile('../results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
         except Exception as e:
             print('caught exception while trying to copy results: {}'.format(e))
             import pdb; pdb.set_trace()
         try:
-            shutil.copyfile('/home/eric/code/gensim/results/outlier_det_{}.txt'.format(self.method), parent_dir + '/results_outlier_det.txt')
-            shutil.copyfile('/home/eric/code/gensim/results/word_class_{}.txt'.format(self.method), parent_dir + '/results_word_class.txt')
+            shutil.copyfile('../results/outlier_det_{}.txt'.format(self.method), parent_dir + '/results_outlier_det.txt')
+            shutil.copyfile('../results/word_class_{}.txt'.format(self.method), parent_dir + '/results_word_class.txt')
         except Exception as e:
             print('caught exception while trying to copy results: {}'.format(e))
             import pdb; pdb.set_trace()
@@ -497,8 +467,6 @@ class GensimSandbox(object):
 
     def train(self, experiment=''):
         self.get_model_with_vocab()
-        #self.test_embedding_evaluation()       ########### TESTING
-        #sys.exit()
         self.start_time = time.time()
         if experiment != '':
             experiment = '_' + experiment.replace(' ', '_')
@@ -553,6 +521,23 @@ class GensimSandbox(object):
         self.save_metadata()
         print('All done training and evaluating {}!'.format(self.method))
 
+
+def list_vars_in_checkpoint(dirname):
+    ''' Just for tf debugging.  '''
+    from tensorflow.contrib.framework.python.framework.checkpoint_utils import list_variables
+    abspath = os.path.abspath(dirname)
+    return list_variables(abspath)
+
+
+def input_with_timeout(prompt, timeout):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    ready, _, _ = select.select([sys.stdin], [],[], timeout)
+    if ready:
+        return sys.stdin.readline().rstrip('\n') # expect stdin to be line-buffered
+    return ''
+
+
 def main():
     method = None
     num_articles = None
@@ -569,18 +554,6 @@ def main():
             embedding_dim = int(arg.split('--embedding_dim=')[1])
     assert all([method, num_articles, min_count, embedding_dim]), 'Please supply all necessary parameters'
 
-    def input_with_timeout(prompt, timeout):
-        sys.stdout.write(prompt)
-        sys.stdout.flush()
-        ready, _, _ = select.select([sys.stdin], [],[], timeout)
-        if ready:
-            return sys.stdin.readline().rstrip('\n') # expect stdin to be line-buffered
-        return ''
-    experiment = ''
-    #experiment = input_with_timeout(
-    #    "Enter an experiment name (or press enter for no specific experiment): ",
-    #    30.0,  # timeout of 30sec
-    #)
     print('Creating sandbox with method {}, num_articles {} and min_count {}.'.format(method, num_articles, min_count))
 
     sandbox = GensimSandbox(
@@ -589,7 +562,7 @@ def main():
         embedding_dim=embedding_dim,
         min_count=min_count,
     )
-    sandbox.train(experiment=experiment)
+    sandbox.train(experiment='')
 
 if __name__ == '__main__':
     main()

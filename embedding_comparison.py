@@ -10,7 +10,7 @@ import sys
 from embedding_evaluation import EmbeddingTaskEvaluator, evaluate_vectors_from_path
 
 class EmbeddingComparison(object):
-    def __init__(self, num_sents, min_count, methods, comparison_name, embedding_dim=None, embedding_dim_list=None, normalize=True):
+    def __init__(self, num_sents, min_count, methods, comparison_name, embedding_dim=None, embedding_dim_list=None, normalize=True, fname=None):
         '''
         `methods` is a list of strings
         `num_sents`, `embedding_dim`, and `min_count` are passed in uniformly for a more fair comparison (we should be evaluating on the exact same test suite, the
@@ -29,11 +29,27 @@ class EmbeddingComparison(object):
 
         diff_dims = len(set(embedding_dim_list)) != 1  # if we are comparing embeddings of multiple dimensions, add the dimension to the method (for keeping track)
         for method, dim in zip(methods, embedding_dim_list):
-            fname = 'runs/{method}/{num_sents}_{min_count}_{dim}/vectors.txt'.format(**locals())
+            if method == 'word2vec':
+                fname = '../word2vec.txt'
+            elif method == 'glove':
+                fname = '../glove/glove.6B.300d.txt'
+            else:
+                fname = 'runs/{}/{}_{}_{}/vectors.txt'.format(method, num_sents, min_count, dim)
             if diff_dims:
                 method += '_{}'.format(dim)
             self.evaluators.append(EmbeddingTaskEvaluator(method=method, fname=fname, normalize_vects=normalize))
-        self.vocab_set = set(self.evaluators[0].embedding_dict.keys())
+        print('intersecting vocabs...')
+        vocab_sets = [set(evaluator.embedding_dict.keys()) for evaluator in self.evaluators]
+        self.vocab_set = set.intersection(*vocab_sets)
+        print('intersected vocab len: {}'.format(len(self.vocab_set)))
+        print('intersecting embedding dicts...')
+        for evaluator in self.evaluators:
+            d = evaluator.embedding_dict
+            keys = [x for x in d.keys()]
+            for k in keys:
+                if k not in self.vocab_set:
+                    d.pop(k, None)
+        print('done initializing!')
 
     def print_method(self, method):
         print()
@@ -97,8 +113,6 @@ class EmbeddingComparison(object):
             results.index = [evaluator.method]
             frames.append(results)
             print(results)
-            #results_dirname = 'results_{}.txt'.format(evaluator.method)
-            #evaluate_vectors_from_path(fname, results_dirname)
         all_results = pd.concat(frames)
         return all_results
 
@@ -126,7 +140,6 @@ class EmbeddingComparison(object):
 
     def compare_analogy(self, train_pct):
         print("\n==================================")
-        # TODO: multithread this
         sem_dict = {}
         syn_dict = {}
         for evaluator in self.evaluators:
@@ -208,7 +221,6 @@ class EmbeddingComparison(object):
             sentiment_analysis_50_results = self.compare_sentiment_analysis(train_pct=.5)
             sentiment_analysis_results = self.compare_sentiment_analysis()
 
-            '''
             word_class_10_results = self.compare_word_classification(train_pct=.1)
             word_class_30_results = self.compare_word_classification(train_pct=.3)
             word_class_50_results = self.compare_word_classification(train_pct=.5)
@@ -222,6 +234,7 @@ class EmbeddingComparison(object):
             analogy_sem_results_50, analogy_syn_results_50 = self.compare_analogy(.5)
             analogy_sem_results, analogy_syn_results = self.compare_analogy(1.0)
 
+            result_name_pairs = [
                 (analogy_sem_results_10, 'Analogy 10% (sem)'),
                 (analogy_sem_results_30, 'Analogy 30% (sem)'),
                 (analogy_sem_results_50, 'Analogy 50% (sem)'),
@@ -231,16 +244,12 @@ class EmbeddingComparison(object):
                 (analogy_syn_results_30, 'Analogy 30% (syn)'),
                 (analogy_syn_results_50, 'Analogy 50% (syn)'),
                 (analogy_syn_results, 'Analogy 100% (syn)'),
-            '''
 
-            result_name_pairs = [
                 (sentiment_analysis_10_results, 'Sentiment analysis (10%)'), 
                 (sentiment_analysis_30_results, 'Sentiment analysis (30%)'), 
                 (sentiment_analysis_50_results, 'Sentiment analysis (50%)'), 
                 (sentiment_analysis_results, 'Sentiment analysis (100%)'), 
-            ]
 
-            '''
                 (word_class_10_results, 'PoS classification (10%)'), 
                 (word_class_30_results, 'PoS classification (30%)'), 
                 (word_class_50_results, 'PoS classification (50%)'), 
@@ -250,7 +259,7 @@ class EmbeddingComparison(object):
                 (outlier_det2_accs, 'OD2 acc'), 
                 (outlier_det3_opps, 'OD3 OPP'), 
                 (outlier_det3_accs, 'OD3 acc'), 
-            '''
+            ]
             df = pd.DataFrame([ d for (d, name) in result_name_pairs ])
             df.index = [ name for (d, name) in result_name_pairs ]
             df = df.transpose()
@@ -286,31 +295,24 @@ if __name__ == '__main__':
     comparison_name = sys.argv[1]
     embedding_dim = None
     embedding_dim_list = None
+    min_count = 2000
     if comparison_name == '10e6':
         num_sents = int(10e6)
-        methods = ['random_gauss', 'cbow', 'nnse', 'cp_log15', 'cp-s_log15', 'cp-sn', 'jcp-s']
+        methods = ['random_gauss', 'cbow', 'nnse', 'cp-s_log15', 'jcp-s']
         embedding_dim = 300
     elif comparison_name == 'shifted':
         num_sents = int(10e6)
         methods = ['cp', 'cp_log15', 'cp-s'] + ['cp-s_log{}'.format(i) for i in [5, 10, 15, 20, 25]]
         embedding_dim = 300
-    elif comparison_name == 'jcp-s':
-        num_sents = int(10e6)
-        methods = ['jcp-s','jcp-s_equalweights', 'nnse', 'cbow']
-        embedding_dim = 300
-    elif comparison_name == 'jcp-s_dims':  # JCP-S EMBEDDING DIM COMPARISON
-        num_sents = int(10e6)
-        embedding_dim_list = [100, 200, 300, 400, 500, 1000]
-        methods = ['jcp-s' for _ in embedding_dim_list]
-    elif comparison_name == '30e6':  # 30E6 SENTS
-        num_sents = int(30e6)
-        methods = ['random', 'cbow', 'nnse', 'cp', 'cp-s', 'cp-sn', 'jcp-s', 'jcp-s_1e-8_reg']
-        embedding_dim = 300
     elif comparison_name == 'test':
         num_sents = int(10e6)
         methods = ['cbow', 'cp-s']
         embedding_dim = 300
-    min_count = 2000
+    elif comparison_name == 'wiki':
+        num_sents = int(1e6)
+        methods = ['random', 'cbow', 'nnse', 'cp-s', 'jcp-s', 'word2vec', 'glove']
+        embedding_dim = 300
+        min_count = 210
     comparator = EmbeddingComparison(
         methods=methods,
         num_sents=num_sents,
@@ -320,10 +322,7 @@ if __name__ == '__main__':
         comparison_name=comparison_name,
     )
 
-    # Don't really need num runs because most of these methods aren't even stochastic (wordsim, etc)
-    #comparator.compare_outlier_detection(2)
-    #comparator.compare_outlier_detection(3)
-    #comparator.compare_analogy(1.0)
-    #sys.exit()
-    comparator.compare_all(num_runs=5)
+    comparator.compare_analogy(0.5)
+    comparator.compare_analogy(1.0)
+    #comparator.compare_all(num_runs=1)
 

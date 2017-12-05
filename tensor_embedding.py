@@ -62,14 +62,6 @@ class TensorEmbedding(object):
             f.write('{} {}\n'.format(count, self.embedding_dim))  # write the number of vects
             f.write(content)
 
-    def evaluate(self, rel_path='vectors.txt'):
-        self.write_embedding_to_file(fname=rel_path)
-        method = None
-        method = self.optimizer_type
-        out_fname = 'results_iter_{}.txt'.format(method)
-        os.system('time python3 embedding_benchmarks/scripts/evaluate_on_all.py -f /home/eric/code/gensim/{} -o /home/eric/code/gensim/results/{}'.format(rel_path, out_fname))
-        print('done evaluating.')
-
     def get_embedding_matrix(self):
         embedding = self.decomp_method.U.eval(self.sess)
         return embedding
@@ -118,7 +110,6 @@ class TensorEmbedding(object):
                     values=[count for _, count in counts_iter],
                     shape=[self.vocab_len, self.vocab_len, self.vocab_len],
                 )
-                # this tensor takes about .12 seconds to make. Too slow? Since we're doing hundreds of thousands of batches
             yield sent_tensor
 
     def train(self, batches):
@@ -136,7 +127,7 @@ class PpmiSvdEmbedding(TensorEmbedding):
         U,S,V = np.linalg.svd(ppmi_tensor)
 
         U_d = U[:,:self.embedding_dim]
-        V_d = V[:self.embedding_dim, :]  # is this correct? (does it matter?)
+        V_d = V[:self.embedding_dim, :]
         S_d = np.diag(S[:self.embedding_dim])
         sqrt_S_d = scipy.linalg.sqrtm(S_d)
         self.embedding = np.matmul(U_d, sqrt_S_d)
@@ -158,7 +149,6 @@ class PMIGatherer(object):
     def P(self, x):
         '''
         MLE for probabilities: #(x)/|D|
-
         '''
         if isinstance(x, tuple):  # n-gram probability
             assert len(x) == self.n
@@ -214,13 +204,16 @@ class PMIGatherer(object):
                 for ix in self.get_indices(batch, update_uni_counts=True):
                     self.n_counts[ix] += 1
                 if len(self.n_counts) > 1e8:
-                    self.kill_ncounts(0.5, 1)
+                    self.kill_ncounts(0.6, 1)
                     remaining = len(self.n_counts)
                     if remaining > 9e7:
                         self.kill_ncounts(0.6, 2)
                         remaining = len(self.n_counts)
                         if remaining > 8e7:
-                            self.kill_ncounts(0.7, 3)
+                            self.kill_ncounts(0.6, 3)
+                            remaining = len(self.n_counts)
+                            if remaining > 7e7:
+                                self.kill_ncounts(0.6, 4)
         else:  # time is more impt than memory
             print('Populating count dicts (in parallel)...')
             batch_counts, n_samples_per_batch = zip(*Parallel(n_jobs=50)(delayed(update_counts)(self, b) for b in batches))

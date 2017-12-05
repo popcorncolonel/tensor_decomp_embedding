@@ -1,5 +1,5 @@
-min_count = 2000
-num_articles = 1e6
+min_count = 210
+num_articles = 1e5
 embedding_dim = 300
 
 random:

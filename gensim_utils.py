@@ -83,7 +83,7 @@ def batch_generator2(model, sentences, batch_size):
 if __name__ == '__main__':
     def sentences_generator(num_sents=5e6):
         num_sents = int(num_sents)
-        tokenized_wiki = '/home/eric/code/wikidump_2008.txt.randomized'  # already has stopwords and hawaiian removed
+        tokenized_wiki = '../wikidump_2008.txt.randomized'  # already has stopwords removed
         count = 0
         n_tokens = 0
         with gensim.utils.smart_open(tokenized_wiki, 'r') as f:
