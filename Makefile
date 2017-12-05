@@ -1,4 +1,4 @@
-min_count = 210
+min_count = 1000
 num_articles = 1e5
 embedding_dim = 300
 
@@ -25,6 +25,8 @@ jcp-s_432:
 
 cbow:
 	python3 -m pdb -c continue test_gensim.py --method=cbow --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+sgns:
+	python3 -m pdb -c continue test_gensim.py --method=sgns --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 svd:
 	python3 -m pdb -c continue test_gensim.py --method=svd --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cnn:

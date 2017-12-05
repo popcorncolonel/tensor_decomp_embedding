@@ -67,6 +67,12 @@ class WordEmbedding(object):
             f.write('{} {}\n'.format(count, self.embedding_size))  # write the number of vects
             f.write(content)
 
+    def embed_with_sgns(self, embedded_target):
+        '''
+        Given the embedding of the input, embeds the hidden layer with the formulation in CBOW
+        '''
+        self.h = embedded_target
+
     def embed_with_cbow(self, embedded_chars):
         '''
         Given the embedding of the input, embeds the hidden layer with the formulation in CBOW
@@ -178,7 +184,7 @@ class WordEmbedding(object):
                 tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
                 name='embedding_matrix'
             )
-            self.context_embedding = C
+            self.context_embedding = C  # aka the first embedding matrix in the NN. If SGNS, this is not actually the context embedding!
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
             self.embedded_chars = tf.nn.embedding_lookup(C, self.input_x)
 
@@ -191,6 +197,10 @@ class WordEmbedding(object):
             elif self.method == 'cnn':  # CNN
                 print("Embedding the context with CNN")
                 self.embed_with_cnn(self.embedded_chars)
+            elif self.method == 'sgns':  # SGNS
+                print("Embedding the Target word (not the context) (SGNS).")
+                embedded_target = tf.nn.embedding_lookup(C, self.input_y)
+                self.embed_with_sgns(embedded_target)
             else:  # CBOW
                 print("Embedding the context with simple averaging (CBOW).")
                 self.embed_with_cbow(self.embedded_chars)
@@ -233,17 +243,30 @@ class WordEmbedding(object):
             )
             sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
 
-            losses = tf.nn.nce_loss(
-            #losses=tf.nn.sampled_softmax_loss(
-                weights=fc_W,
-                biases=fc_b,
-                inputs=tf.cast(self.h, tf.float32),
-                labels=self.input_y,
-                num_sampled=self.vocab_model.negative,
-                num_classes=len(vocab_model.vocab),
-                remove_accidental_hits=True,
-                sampled_values=sampled_values,
-            )
+            if self.method != 'sgns':
+                losses = tf.nn.nce_loss(
+                #losses=tf.nn.sampled_softmax_loss(
+                    weights=fc_W,
+                    biases=fc_b,
+                    inputs=tf.cast(self.h, tf.float32),
+                    labels=self.input_y,
+                    num_sampled=self.vocab_model.negative,
+                    num_classes=len(vocab_model.vocab),
+                    remove_accidental_hits=True,
+                    sampled_values=sampled_values,
+                )
+            else:
+                losses = tf.nn.nce_loss(
+                    weights=fc_W,
+                    biases=fc_b,
+                    inputs=tf.squeeze(tf.cast(self.h, tf.float32), axis=1),
+                    labels=self.input_x,
+                    num_sampled=self.vocab_model.negative,
+                    num_classes=len(vocab_model.vocab),
+                    num_true=self.context_size,
+                    remove_accidental_hits=True,
+                    sampled_values=sampled_values,
+                )
             self.loss = tf.reduce_mean(losses)
             #self.loss += .01 * (tf.nn.l2_loss(self.context_embedding) + tf.nn.l2_loss(fc_W))  # regularization
 
@@ -263,6 +286,7 @@ class WordEmbedding(object):
         self.vocab_model.syn0 = embedding
 
     def train_step(self, x_batch, y_batch, print_every=50):
+        y_batch = np.reshape(y_batch, (len(y_batch), 1))
         feed_dict = {
             self.input_x: x_batch,
             self.input_y: y_batch,
@@ -276,12 +300,12 @@ class WordEmbedding(object):
             ],
             feed_dict=feed_dict
         )
-        self.step = step
         if step % print_every == 0:
             print("{}: loss {:g}".format(step, loss))
         self.train_summary_writer.add_summary(summaries, step)
 
     def dev_step(self, x_batch, y_batch):
+        y_batch = np.reshape(y_batch, (len(y_batch), 1))
         feed_dict = {
             self.input_x: x_batch,
             self.input_y: y_batch,

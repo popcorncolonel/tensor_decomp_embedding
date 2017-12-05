@@ -83,6 +83,7 @@ class GensimSandbox(object):
                 model = dill.load(f)
         model.tt = 0
         model.cbow = 0
+        model.sgns = 0
         model.cnn = 0
         model.subspace = 0
         model.vector_size = self.embedding_dim
@@ -92,6 +93,8 @@ class GensimSandbox(object):
             model.subspace = 1
         elif self.method == 'cbow':
             model.cbow = 1
+        elif self.method == 'sgns':
+            model.sgns = 1
         elif self.method == 'cnn':
             model.cnn = 1
         print('Finished building vocab. length of vocab: {}'.format(len(model.vocab)))
@@ -227,7 +230,7 @@ class GensimSandbox(object):
         if nonneg:
             shift = 0.
         else:
-            shift = -np.log2(15.)
+            shift = -np.log2(5.)
 
         def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
             batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
@@ -499,7 +502,7 @@ class GensimSandbox(object):
         elif self.method in ['nnse']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True)
-        elif self.method in ['cnn', 'cbow', 'tt', 'subspace']:
+        elif self.method in ['cnn', 'cbow', 'tt', 'subspace', 'sgns']:
             self.method += experiment
             self.train_gensim_embedding()
         elif self.method in ['svd']:
