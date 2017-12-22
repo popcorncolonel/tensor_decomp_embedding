@@ -5,10 +5,10 @@ import tensorflow as tf
 import time
 
 class CPDecomp(object):
-    def __init__(self, shape, rank, sess, ndims=3, optimizer_type='2sgd', reg_param=1e-10):
+    def __init__(self, shape, rank, sess, ndims=3, optimizer_type='adam', reg_param=1e-10, is_glove=False, nonneg=False):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
-        `optimizer_type` must be in ('adam', 'sgd', 'sals', '2sgd')
+        `optimizer_type` must be in ('adam', 'sgd', 'sals', '2sgd', 'adagrad')
         
         Approximates a tensor whose approximations are repeatedly fed in batch format to `self.train`
         '''
@@ -17,20 +17,24 @@ class CPDecomp(object):
         self.shape = shape
         self.ndims = ndims
         self.sess = sess
+        self.is_glove = is_glove
+        self.nonneg = nonneg
 
-        with tf.device('/gpu:0'):
+        with tf.device('/cpu:0'):
             # t-th batch tensor
             # contains all data for this minibatch. already summed/averaged/whatever it needs to be. 
             self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')
             self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
             shape_sparse = np.array(self.shape, dtype=np.int64)
-            self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
+            self.X_t = tf.SparseTensorValue(self.indices, self.values, dense_shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} V_{jr} W_{kr}
             self.U = tf.Variable(tf.random_uniform(
                 shape=[self.shape[0], self.rank],
                 minval=-1.0,
                 maxval=1.0,
             ), name="U")
+            if self.nonneg:
+                self.U = tf.nn.relu(self.U)
             self.V = tf.Variable(tf.random_uniform(
                 shape=[self.shape[1], self.rank],
                 minval=-1.0,
@@ -44,25 +48,6 @@ class CPDecomp(object):
                 ), name="W")
             self.create_loss_fn(reg_param=reg_param)
 
-    def evaluate(self, X):
-        '''
-        `X` is the actual representation of `X_hat`. We return the RMSE between X_hat and X
-        returns sqrt(1/#entries * sum_{entry} (X_{entry} - X_hat_{entry})^2
-
-        WARNING: could use a lot of memory
-        '''
-
-        # X_hat ~= U x1 V x2 W
-        X_hat = tf.einsum('ir,jr,kr->ijk', self.U, self.V, self.W)
-        tf_X = tf.constant(X, dtype=tf.float32)
-        rmse = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, tf_X))))
-        rmse_val = rmse.eval()
-        if self.results_file is not None:
-            if self.batch_num == 0:
-                print("RMSE", file=self.results_file)
-            print("{}".format(rmse_val), file=self.results_file)
-        print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
-       
     def train_step(self, approx_indices, approx_values, print_every=1):
         if not hasattr(self, 'prev_time'):
             self.prev_time = time.time()
@@ -80,8 +65,8 @@ class CPDecomp(object):
             ],
             feed_dict=feed_dict,
         )
-        print('step {} took {} secs'.format(step, time.time() - t))
-        print([np.max(x) for x in debug_tensies])
+        if step % print_every == 0:
+            print('step {} took {} secs'.format(step, time.time() - t))
         if self.checkpoint_every is not None:
             if step % self.checkpoint_every == 0 and step > 0:
                 t = time.time()
@@ -91,17 +76,16 @@ class CPDecomp(object):
 
         if step % print_every == 0:
             t = time.time()
-            err, reg = self.sess.run(
+            err = self.sess.run(
                 [
                     self.L,
-                    self.reg,
                 ],
                 feed_dict=feed_dict,
             )
             #print('getting loss took {} secs'.format(time.time() - t))
 
             batch_time = (time.time() - self.prev_time) / print_every
-            print("Err at step {}: {}; reg loss: {} (avg batch time: {})".format(step, err, reg, batch_time))
+            print("Err at step {}: {}; (avg batch time: {})".format(step, err, batch_time))
             self.prev_time = time.time()
             self.avg_time = (batch_time + self.total_recordings * self.avg_time) / (self.total_recordings + 1.0)
             self.total_recordings += 1
@@ -111,28 +95,57 @@ class CPDecomp(object):
         L(X; U,V,W) = .5 sum_{i,j,k where X_ijk =/= 0} (X_ijk - sum_{r=1}^{R} U_ir V_jr W_kr)^2
         L_{rho} = L(X; U,V,W) + rho * (||U||^2 + ||V||^2 + ||W||^2) where ||.|| represents some norm (L2, L1, Frobenius)
         """
-        def L(X, U,V,W):
+        def L(X):
             """
             X is a sparse tensor. U,V,W are dense. 
             """
-            predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.V, x[1]) * tf.gather(self.W, x[2]))
-            predicted_vals = tf.map_fn(predict_val_fn, X.indices, dtype=tf.float32, parallel_iterations=200, infer_shape=False, back_prop=False)
-            errs = tf.squared_difference(predicted_vals, X.values)
+            if self.ndims > 2:
+                raise NotImplementedError  # TODO: re-fix if need higher dims
+                predict_val_fn = lambda x: tf.reduce_sum(tf.gather(self.U, x[0]) * tf.gather(self.V, x[1]) * tf.gather(self.W, x[2]))
+            else:
+                if self.ndims == 2:
+                    vects_1 = tf.nn.embedding_lookup(self.U, tf.gather(tf.transpose(X.indices), 0))
+                    vects_2 = tf.nn.embedding_lookup(self.V, tf.gather(tf.transpose(X.indices), 1))
+                    prods = vects_1 * vects_2
+                    dots = tf.reduce_sum(prods, axis=1)
+                    if self.is_glove:
+                        B1s = tf.Variable(tf.random_uniform(
+                            shape=[self.shape[0], 1],
+                            minval=-1.0,
+                            maxval=1.0,
+                        ), name="b1s")
+                        B2s = tf.Variable(tf.random_uniform(
+                            shape=[self.shape[0], 1],
+                            minval=-1.0,
+                            maxval=1.0,
+                        ), name="b2s")
+                        predicted_vals = dots + tf.nn.embedding_lookup(B1s, tf.gather(tf.transpose(X.indices), 0)) \
+                                      + tf.nn.embedding_lookup(B2s, tf.gather(tf.transpose(X.indices), 1))
+                    else:
+                        predicted_vals = dots
+                    errs = tf.squared_difference(predicted_vals, X.values)
+                    if self.is_glove:
+                        errs = errs * tf.minimum(1., ((tf.exp(X.values)) / 100.) ** 0.75)  # X.values[i] is log(X_ij)
             return tf.reduce_mean(errs)
 
-        def reg(U,V,W):
+        def reg():
             # NOTE: l2_loss already squares the norms. So we don't need to square them.
             summed_norms = (
-                tf.nn.l2_loss(U, name="U_norm") +
-                tf.nn.l2_loss(V, name="V_norm") +
-                tf.nn.l2_loss(W, name="W_norm")
+                tf.nn.l2_loss(self.U, name="U_norm") +
+                tf.nn.l2_loss(self.V, name="V_norm") +
+                tf.nn.l2_loss(self.W, name="W_norm")
             )
             return (.5 * reg_param) * summed_norms
 
-        if reg_param > 0.0:
-            self.loss = L(self.X_t, self.U,self.V,self.W) + reg(self.U, self.V, self.W)
+        self.L = L(self.X_t)
+        self.reg = tf.constant(0.0)
+        if reg_param > 0.0 and self.ndims > 2:
+            self.reg = reg(self.U, self.V, self.W)
         else:
-            self.loss = L(self.X_t, self.U,self.V,self.W)
+            if not self.is_glove:
+                self.reg = reg_param * tf.norm(self.U, ord=1)
+        self.loss = self.L + self.reg
+
         
     def get_train_ops(self):
         if self.optimizer_type == '2sgd':
@@ -143,6 +156,8 @@ class CPDecomp(object):
             train_ops = [self.get_train_op_adam()]
         elif self.optimizer_type == 'sgd':
             train_ops = [self.get_train_op_sgd()]
+        elif self.optimizer_type == 'adagrad':
+            train_ops = [self.get_train_op_adagrad()]
         inc_t = tf.assign(self.global_step, self.global_step+1)
         return [*train_ops, inc_t]
 
@@ -245,6 +260,9 @@ class CPDecomp(object):
     def get_train_op_sgd(self):
         return self.optimizer.minimize(self.loss)
 
+    def get_train_op_adagrad(self):
+        return self.optimizer.minimize(self.loss)
+
     def train(self, expected_tensors, true_X=None, evaluate_every=100, results_file=None, write_loss=True, checkpoint_every=None):
         '''
         Assumes `expected_tensors` is a generator of sparse tensor values. 
@@ -252,13 +270,15 @@ class CPDecomp(object):
         self.batch_num = 0
         self.results_file = results_file
         num_invalid_arg_exceptions = 0
-        with tf.device('/gpu:0'):
+        with tf.device('/cpu:0'):
             print('setting up variables...')
             self.global_step = tf.Variable(0.0, name='global_step', trainable=False)
             if self.optimizer_type == 'adam':
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             elif self.optimizer_type == 'sgd':
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=1e-2)
+                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=1e-0)
+            elif self.optimizer_type == 'adagrad':
+                self.optimizer = tf.train.AdagradOptimizer(learning_rate=.05)
 
             self.train_ops = self.get_train_ops()
 
@@ -283,14 +303,13 @@ class CPDecomp(object):
 
         print('initializing variables...')
         self.sess.run(tf.global_variables_initializer())
-        print("U: {}".format(self.U.eval(self.sess)))
+        print("Starting ASYMMETRIC CP Decomp training")
+        #print("U: {}".format(self.U.eval(self.sess)))
         with self.sess.as_default():
             print('looping through batches...')
             for expected_indices, expected_values in expected_tensors:
-                if self.batch_num % evaluate_every == 0 and true_X is not None:
-                    self.evaluate(true_X)
                 try:
-                    self.train_step(expected_indices, expected_values)
+                    self.train_step(expected_indices, expected_values, print_every=100)
                 except tf.errors.InvalidArgumentError as e:
                     self.batch_num -= 1
                     num_invalid_arg_exceptions += 1
@@ -352,7 +371,7 @@ def test_decomp():
 
 
 class SymmetricCPDecomp(object):
-    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='adam', reg_param=1e-10, nonneg=True, gpu=True, mean_value=None):
+    def __init__(self, dim, rank, sess, ndims=3, optimizer_type='adam', reg_param=1e-10, nonneg=True, gpu=True, is_glove=False, mean_value=None):
         '''
         `rank` is R, the number of 1D tensors to hold to get an approximation to `X`
         since X is supersymmetric, `dim` is the length of each dimension
@@ -368,13 +387,15 @@ class SymmetricCPDecomp(object):
         self.reg_param = reg_param
         self.gpu = gpu
         self.mean_value = mean_value
+        self.is_glove = is_glove
 
         with tf.device('/{}:0'.format('gpu' if self.gpu else 'cpu')):
             # t-th batch tensor
             self.indices = tf.placeholder(tf.int64, shape=[None, self.ndims], name='X_t_indices')  # always fed in in a sorted way
             self.values = tf.placeholder(tf.float32, shape=[None], name='X_t_values')
             shape_sparse = np.array(self.shape, dtype=np.int64)
-            self.X_t = tf.SparseTensorValue(self.indices, self.values, shape=shape_sparse)
+            
+            self.X_t = tf.SparseTensorValue(self.indices, self.values, dense_shape=shape_sparse)
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
             if self.mean_value is None:
                 mu = 10.0
@@ -390,25 +411,6 @@ class SymmetricCPDecomp(object):
                 self.sparse_U = tf.nn.relu(self.U, name='Sparse_U')
         self.create_loss_fn(reg_param=reg_param)
 
-    def evaluate(self, X):
-        '''
-        `X` is the actual representation of `X_hat`. We return the RMSE between X_hat and X
-        returns sqrt(1/#entries * sum_{entry} (X_{entry} - X_hat_{entry})^2
-
-        WARNING: could use a lot of memory
-        '''
-
-        # X_hat ~= sum_{r=1}^{R} U_r \circ ... \circ U_r
-        X_hat = tf.einsum('ir,jr,kr->ijk', self.U, self.U, self.U)
-        tf_X = tf.constant(X, dtype=tf.float32)
-        rmse = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(X_hat, tf_X))))
-        rmse_val = rmse.eval()
-        if self.results_file is not None:
-            if self.batch_num == 0:
-                print("RMSE", file=self.results_file)
-            print("{}".format(rmse_val), file=self.results_file)
-        print("RMSE (step {}): {}".format(self.batch_num, rmse_val))
-       
     def train_step(self, approx_tensor, print_every=10, validate_indices=False):
         approx_indices, approx_values = approx_tensor
         if not hasattr(self, 'prev_time'):
@@ -469,9 +471,24 @@ class SymmetricCPDecomp(object):
                     i_indices = tf.gather(indices, i, name='{}_indices'.format(i))  # of shape (N,) - represents all the indices to get from the U matrix
                     i_vects = tf.gather(U, i_indices, name='{}_vects'.format(i))
                     prod_vects *= i_vects
-                predicted_X_ijks = tf.reduce_sum(prod_vects, axis=1)
+                    predicted_X_ijks = tf.reduce_sum(prod_vects, axis=1)
                
+                if self.is_glove:
+                    B1s = tf.Variable(tf.random_uniform(
+                        shape=[self.shape[0], 1],
+                        minval=-1.0,
+                        maxval=1.0,
+                    ), name="b1s")
+                    B2s = tf.Variable(tf.random_uniform(
+                        shape=[self.shape[0], 1],
+                        minval=-1.0,
+                        maxval=1.0,
+                    ), name="b2s")
+                    predicted_X_ijks = predicted_X_ijks + tf.nn.embedding_lookup(B1s, tf.gather(tf.transpose(X.indices), 0)) \
+                                  + tf.nn.embedding_lookup(B2s, tf.gather(tf.transpose(X.indices), 1))
                 errors = tf.squared_difference(X_ijks, predicted_X_ijks)  # of shape (N,) - elementwise error for each entry in X_ijk
+                if self.is_glove:
+                    errors = errors * tf.minimum(1., ((tf.exp(X_ijks)) / 100.) ** 0.75)  # X.values[i] is log(X_ij)
                 mean_loss = tf.reduce_mean(errors)  # average loss per entry in X - scalar!
                 return mean_loss
 
@@ -588,7 +605,7 @@ class JointSymmetricCPDecomp(SymmetricCPDecomp):
                 self.indices.append(indices)
                 self.values.append(values)
                 shape_sparse = np.array([size] * dim, dtype=np.int64)
-                self.X_ts.append(tf.SparseTensorValue(indices, values, shape=shape_sparse))
+                self.X_ts.append(tf.SparseTensorValue(indices, values, dense_shape=shape_sparse))
             # Goal: X_ijk == sum_{r=1}^{R} U_{ir} U_{jr} U_{kr}
             mu = 15.0
             mean = ((1. / self.rank) * mu) ** (1/2)

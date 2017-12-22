@@ -33,7 +33,7 @@ def get_target_y(word_vocabs, word_index):
     return word_vocabs[word_index].index
 
 
-def batch_generator(model, sentences, batch_size=512, n_iters=1, fixed_size=True):
+def batch_generator(model, sentences, batch_size=512, n_iters=1, fixed_size=True, stopwords=set()):
     '''
     if `fixed_size` is True, sentences will only include words and contexts in the middle of sentences
         (because the first word in the sentence doesn't have 5 words before it)
@@ -46,7 +46,7 @@ def batch_generator(model, sentences, batch_size=512, n_iters=1, fixed_size=True
     for i in range(n_iters):
         #print('STARTING NEW TRAINING SET ITER!!!!\nITER {}\n'.format(i))
         for sentence in sentences:
-            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab]
+            word_vocabs = [model.vocab[w] for w in sentence if w in model.vocab and w not in stopwords]
             for pos, word in enumerate(word_vocabs):
                 if fixed_size:
                     if pos < model.window:

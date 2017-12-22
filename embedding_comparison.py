@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import random
 import sys
+import time
 
 from embedding_evaluation import EmbeddingTaskEvaluator, evaluate_vectors_from_path
 
@@ -22,6 +23,7 @@ class EmbeddingComparison(object):
         if embedding_dim is not None:
             embedding_dim = int(embedding_dim)
             embedding_dim_list = [embedding_dim for _ in methods]
+        self.methods = methods
         self.num_sents = num_sents
         self.min_count = min_count
         self.embedding_dim_list = embedding_dim_list
@@ -31,8 +33,6 @@ class EmbeddingComparison(object):
         for method, dim in zip(methods, embedding_dim_list):
             if method == 'word2vec':
                 fname = '../word2vec.txt'
-            elif method == 'glove':
-                fname = '../glove/glove.6B.300d.txt'
             else:
                 fname = 'runs/{}/{}_{}_{}/vectors.txt'.format(method, num_sents, min_count, dim)
             if diff_dims:
@@ -65,8 +65,8 @@ class EmbeddingComparison(object):
             self.print_method(evaluator.method)
             for word in words:
                 vec = evaluator.embedding_dict[word]
-                k = 4
-                n = 4
+                k = 3
+                n = 2
                 top_n_dims = vec.argsort()[-n:][::-1]
                 print('Word: {}'.format(word))
                 for i in range(n):
@@ -109,7 +109,7 @@ class EmbeddingComparison(object):
             self.print_method(evaluator.method)
             vecpath = evaluator.fname
             w = load_embedding(vecpath, format='word2vec', normalize=normalize, lower=True, clean_words=False, load_kwargs={})
-            results = evaluate_on_all(w)
+            results = evaluate_on_all(w, categorization=False)
             results.index = [evaluator.method]
             frames.append(results)
             print(results)
@@ -138,13 +138,13 @@ class EmbeddingComparison(object):
             score_dict[method] = score
         return score_dict
 
-    def compare_analogy(self, train_pct):
+    def compare_analogy(self, train_pct, iter_pct=1.0, is_sem_only=False, reg_param=0.001, regularize_all=False):
         print("\n==================================")
         sem_dict = {}
         syn_dict = {}
         for evaluator in self.evaluators:
             self.print_method(evaluator.method)
-            (sem_score, syn_score) = evaluator.analogy_tasks(train_pct=train_pct)
+            (sem_score, syn_score) = evaluator.analogy_tasks(train_pct=train_pct, iter_pct=iter_pct, is_sem_only=is_sem_only, reg_param=reg_param, regularize_all=regularize_all)
             print("Analogy sem/syn scores: {}".format((sem_score, syn_score)))
             method = evaluator.method
             sem_dict[method] = sem_score
@@ -208,13 +208,13 @@ class EmbeddingComparison(object):
             for evaluator in self.evaluators:
                 evaluator.seed_bump = run_index
 
-            # qualitative
-            #self.compare_coherency(n=3)
-            #words = random.sample(list(self.vocab_set), 5)
-            #self.compare_nearest_neighbors(words)
+            print('qualitative:')
+            self.compare_coherency(n=3)
+            words = random.sample(list(self.vocab_set), 5)
             #self.compare_word_dimensions(words)
+            self.compare_nearest_neighbors(words)
 
-            # quantitative
+            print('quantitative:')
             # this should be fastest to slowest
             sentiment_analysis_10_results = self.compare_sentiment_analysis(train_pct=.1)
             sentiment_analysis_30_results = self.compare_sentiment_analysis(train_pct=.3)
@@ -229,21 +229,21 @@ class EmbeddingComparison(object):
             outlier_det2_opps, outlier_det2_accs = self.compare_outlier_detection(n=2)
             outlier_det3_opps, outlier_det3_accs = self.compare_outlier_detection(n=3)
 
-            analogy_sem_results_10, analogy_syn_results_10 = self.compare_analogy(.1)
-            analogy_sem_results_30, analogy_syn_results_30 = self.compare_analogy(.3)
-            analogy_sem_results_50, analogy_syn_results_50 = self.compare_analogy(.5)
-            analogy_sem_results, analogy_syn_results = self.compare_analogy(1.0)
+            #analogy_sem_results_10, analogy_syn_results_10 = self.compare_analogy(.1)
+            #analogy_sem_results_30, analogy_syn_results_30 = self.compare_analogy(.3)
+            #analogy_sem_results_50, analogy_syn_results_50 = self.compare_analogy(.5)
+            #analogy_sem_results, analogy_syn_results = self.compare_analogy(1.0)
 
             result_name_pairs = [
-                (analogy_sem_results_10, 'Analogy 10% (sem)'),
-                (analogy_sem_results_30, 'Analogy 30% (sem)'),
-                (analogy_sem_results_50, 'Analogy 50% (sem)'),
-                (analogy_sem_results, 'Analogy 100% (sem)'),
+                #(analogy_sem_results_10, 'Analogy 10% (sem)'),
+                #(analogy_sem_results_30, 'Analogy 30% (sem)'),
+                #(analogy_sem_results_50, 'Analogy 50% (sem)'),
+                #(analogy_sem_results, 'Analogy 100% (sem)'),
 
-                (analogy_syn_results_10, 'Analogy 10% (syn)'),
-                (analogy_syn_results_30, 'Analogy 30% (syn)'),
-                (analogy_syn_results_50, 'Analogy 50% (syn)'),
-                (analogy_syn_results, 'Analogy 100% (syn)'),
+                #(analogy_syn_results_10, 'Analogy 10% (syn)'),
+                #(analogy_syn_results_30, 'Analogy 30% (syn)'),
+                #(analogy_syn_results_50, 'Analogy 50% (syn)'),
+                #(analogy_syn_results, 'Analogy 100% (syn)'),
 
                 (sentiment_analysis_10_results, 'Sentiment analysis (10%)'), 
                 (sentiment_analysis_30_results, 'Sentiment analysis (30%)'), 
@@ -264,13 +264,14 @@ class EmbeddingComparison(object):
             df.index = [ name for (d, name) in result_name_pairs ]
             df = df.transpose()
 
-            if False:
+            if True:
                 web_results = self.compare_web()
                 all_df = web_results.join(df)
                 all_df = all_df.transpose()  # excel likes it better this way
             else:
                 all_df = df.transpose()
 
+            all_df = all_df[self.methods]  # Reorder columns to be in initial order
             all_dfs.append(all_df)
 
         df_sum = all_dfs[0]
@@ -295,24 +296,23 @@ if __name__ == '__main__':
     comparison_name = sys.argv[1]
     embedding_dim = None
     embedding_dim_list = None
-    min_count = 2000
-    if comparison_name == '10e6':
-        num_sents = int(10e6)
-        methods = ['random_gauss', 'cbow', 'nnse', 'cp-s_log15', 'jcp-s']
+    min_count = 1000
+    if comparison_name == '1e5':
+        num_sents = int(float(comparison_name))
+        methods = ['random', 'cbow', 'sgns', 'glove', 'nnse', 'cp-s', 'jcp-s']
         embedding_dim = 300
-    elif comparison_name == 'shifted':
-        num_sents = int(10e6)
-        methods = ['cp', 'cp_log15', 'cp-s'] + ['cp-s_log{}'.format(i) for i in [5, 10, 15, 20, 25]]
+    elif comparison_name == 'web':
+        num_sents = int(1e5)
+        methods = ['random', 'cbow', 'sgns', 'glove', 'nnse', 'cp-s', 'jcp-s']
         embedding_dim = 300
-    elif comparison_name == 'test':
-        num_sents = int(10e6)
-        methods = ['cbow', 'cp-s']
+    elif comparison_name == 'glove':
+        num_sents = int(1e5)
+        methods = ['random', 'glove', 'glove_sym']
         embedding_dim = 300
-    elif comparison_name == 'wiki':
-        num_sents = int(1e6)
-        methods = ['random', 'cbow', 'nnse', 'cp-s', 'jcp-s', 'word2vec', 'glove']
+    elif comparison_name == 'learn_nn_hparams':
+        num_sents = int(1e5)
+        methods = ['random', 'glove', 'nnse', 'cp-s', 'jcp-s']
         embedding_dim = 300
-        min_count = 210
     comparator = EmbeddingComparison(
         methods=methods,
         num_sents=num_sents,
@@ -322,7 +322,45 @@ if __name__ == '__main__':
         comparison_name=comparison_name,
     )
 
-    comparator.compare_analogy(0.5)
-    comparator.compare_analogy(1.0)
-    #comparator.compare_all(num_runs=1)
+    if comparison_name == 'web':
+        comparator.compare_web(normalize=True)
+    elif comparison_name != 'learn_nn_hparams':
+        comparator.compare_all(num_runs=10)
+    else:
+        t = time.time()
+        results_dict = dict()
+        n_random_trials = 1
+        def loguniform(low=1e-6, high=1, size=None):
+            return np.exp(np.random.uniform(np.log(low), np.log(high), size))
+        for _ in range(7):
+            reg_param = loguniform(.00005, 0.005)  # regulate W3
+            #reg_param = 0.0030505989722323123  # pretty high reg param
+            iter_pct = int(np.random.uniform(5, 50))
+            for regularize_all in [False]:
+                mean_scores = {method: np.array([0., 0., 0., 0.], dtype=np.float64) for method in methods}
+                for _ in range(n_random_trials):
+                    for evaluator in comparator.evaluators:
+                        evaluator.seed_bump += 1
+                    scores1 = comparator.compare_analogy(0.1, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
+                    scores2 = comparator.compare_analogy(0.3, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
+                    scores3 = comparator.compare_analogy(0.5, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
+                    scores5 = comparator.compare_analogy(1., is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
+                    for method in methods:
+                        mean_scores[method] += np.array([
+                            scores1[method], scores2[method], scores3[method], scores5[method]
+                        ]) / n_random_trials
+                for method in methods:
+                    mean_scores[method] = ["{:.4f}".format(x) for x in mean_scores[method]]
+                results_dict[(iter_pct, regularize_all, reg_param)] = mean_scores
+                with open('hparams/{}_{}_{:.4f}_tanh.txt'.format(iter_pct, regularize_all, reg_param), 'w') as f:
+                    for k in mean_scores:
+                        print("{}: {}\n".format(k, mean_scores[k]), file=f)
+            print('time so far: {}'.format(time.time() - t))
+        for k in results_dict:
+            print("{}: {}".format(k, results_dict[k]))
+        print('welp. that took {:.4f} seconds'.format(time.time() - t))
+        print("with biases and with tanh, {} random restarts".format(n_random_trials))
+        print("hiiiigh iter_pct's")
+        import pdb; pdb.set_trace()
+        sys.exit()
 

@@ -2,6 +2,7 @@ import datetime
 import dill
 import gensim
 import gensim.utils
+import itertools
 import numpy as np
 import os
 import pdb
@@ -13,12 +14,12 @@ import sys
 import time
 import tensorflow as tf
 
-#from embedding_evaluation import write_embedding_to_file, evaluate, EmbeddingTaskEvaluator
 from embedding_evaluation import write_embedding_to_file, EmbeddingTaskEvaluator
 from gensim_utils import batch_generator, batch_generator2
+from nltk.corpus import stopwords
+from sklearn.utils import shuffle
 from tensor_embedding import PMIGatherer, PpmiSvdEmbedding
 from tensor_decomp import CPDecomp, SymmetricCPDecomp, JointSymmetricCPDecomp
-from nltk.corpus import stopwords
 
 
 stopwords = set(stopwords.words('english'))
@@ -50,8 +51,8 @@ class GensimSandbox(object):
         count = 0
         for article in articles:
             if count % int(num_articles / 10) == 0:
-                print("Just hit article {} out of {} ({}%)".format(count, num_articles, 100*count / num_articles))
-            article = [x.decode('utf8') for x in article if x not in stopwords]
+                print("Just hit article {} out of {} ({}%)".format(count, num_articles, int(100.*count / num_articles)))
+            article = [x.decode('utf8') for x in article if x.decode('utf8') not in stopwords]
             if count < num_articles:
                 n_tokens += len(article)
                 count += 1
@@ -134,7 +135,7 @@ class GensimSandbox(object):
 
     def train_gensim_embedding(self):
         print('training...')
-        batches = batch_generator(self.model, self.sentences_generator(), batch_size=128)
+        batches = batch_generator(self.model, self.sentences_generator(), batch_size=128, stopwords=stopwords)
         self.model.train(sentences=None, batches=batches, gpu=self.gpu)
         print('finished training!')
 
@@ -174,9 +175,8 @@ class GensimSandbox(object):
                 print('Dumping gatherer took {} secs'.format(time.time() - t))
         return gatherer
 
-    def train_joint_online_cp_embedding(self, dimlist: list, dimweights: list, nonneg: bool):
+    def train_joint_online_cp_embedding(self, dimlist: list, dimweights: list, nonneg: bool, exp_shifts=[1., 15.], neg_sample_percent=0.15,):
         gatherers = [self.get_pmi_gatherer(dim) for dim in dimlist]
-        exp_shifts = [1., 1.]
         shifts = [-np.log2(s) for s in exp_shifts]
 
         def sparse_tensor_batches(batch_size=1000):
@@ -189,7 +189,7 @@ class GensimSandbox(object):
                         debug=False,
                         symmetric=True,
                         log_info=False,
-                        neg_sample_percent=0.0,
+                        neg_sample_percent=neg_sample_percent,
                         pmi=True,
                         shift=shift,
                     )
@@ -202,7 +202,7 @@ class GensimSandbox(object):
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            reg_param = 1e-6
+            reg_param = 0.
             self.to_save['reg_param'] = reg_param
             print('reg_param: {}'.format(reg_param))
             decomp_method = JointSymmetricCPDecomp(
@@ -213,41 +213,73 @@ class GensimSandbox(object):
                 sess=self.sess,
                 reg_param=reg_param,
                 nonneg=nonneg,
-                gpu=True,
+                gpu=self.gpu,
             )
         print('Starting JOINT CP Decomp training')
         decomp_method.train(sparse_tensor_batches())
 
-        U = decomp_method.U.eval(self.sess)
+        with self.sess.as_default():
+            U = decomp_method.U.eval()
         if nonneg:
             sparse_embedding = U.clip(min=0.0)
             self.embedding = sparse_embedding
         else:
             self.embedding = U.copy()
 
-    def train_online_cp_embedding(self, ndims: int, symmetric: bool, nonneg: bool):
+    def train_online_cp_embedding(self,
+                                  ndims: int,
+                                  symmetric: bool,
+                                  nonneg: bool,
+                                  is_glove=False,
+                                  shift=-np.log2(15.),
+                                  neg_sample_percent=0.25,
+                                  reg_param=0.,
+        ):
         gatherer = self.get_pmi_gatherer(ndims)
-        if nonneg:
+        if nonneg or is_glove:
             shift = 0.
         else:
-            shift = -np.log2(5.)
+            shift = shift
 
         def sparse_tensor_batches(batch_size=1000, symmetric=symmetric):
-            batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
-            for batch in batches:
-                sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
-                    batch=batch,
+            if is_glove:
+                def grouper(n, iterable):
+                    it = iter(iterable)
+                    while True:
+                       chunk = tuple(itertools.islice(it, n))
+                       if not chunk:
+                           return
+                       yield chunk
+                (indices, values) = gatherer.create_pmi_tensor(
+                    batch=None,
                     positive=True,
                     debug=False,
-                    symmetric=symmetric,
-                    log_info=False,
-                    neg_sample_percent=0.0 if nonneg else 0.05,
-                    pmi=True,
-                    shift=shift,
+                    symmetric=True,
+                    log_info=True,
+                    pmi=False,
                 )
-                yield sparse_ppmi_tensor_pair
+                (indices, values) = (indices, np.log(values))
+                for i in range(50):
+                    indices_shuffled, values_shuffled = shuffle(indices, values)  # sklearn's shuffle implementation
+                    print('GloVe iteration number {}...'.format(i))
+                    for sampled_indices, sampled_values in zip(grouper(batch_size, indices_shuffled), grouper(batch_size, values_shuffled)):
+                        yield (sampled_indices, sampled_values)
+            else:  # not is_glove
+                batches = batch_generator2(self.model, self.sentences_generator(), batch_size=batch_size)
+                for batch in batches:
+                    sparse_ppmi_tensor_pair = gatherer.create_pmi_tensor(
+                        batch=batch,
+                        positive=True,
+                        debug=False,
+                        symmetric=symmetric,
+                        log_info=False,
+                        neg_sample_percent=neg_sample_percent,
+                        pmi=True,
+                        shift=shift,
+                    )
+                    yield sparse_ppmi_tensor_pair
 
-        (indices, values) = None, None  # to be filled in later
+        (all_indices, all_values) = None, None  # to be filled in later
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
@@ -255,16 +287,17 @@ class GensimSandbox(object):
         with self.sess.as_default():
             if symmetric:
                 print('getting full PMI tensor...')
-                (indices, values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric, shift=shift)
-                mean_value = np.mean(values)
+                (all_indices, all_values) = gatherer.create_pmi_tensor(positive=True, debug=False, symmetric=symmetric, shift=shift)
+                mean_value = np.mean(all_values)
                 print('mean tensor value: {}'.format(mean_value))
 
-                n_entries = len(self.model.vocab) * self.embedding_dim
                 # reg_param should be set so that initial reg. loss is about 1.0
                 # random init: mean=(1. / self.embedding_dim) * (mu ** (1/ndims)). There will be ~|V|*k of these values.
-                mean = (1. / self.embedding_dim) * (mean_value ** (1/ndims))
-                #reg_param = mean / 100.
-                reg_param = 0
+                mean = (1. / self.embedding_dim) * (mean_value ** (1. / ndims))
+                #reg_param = mean / 300.
+                reg_param = reg_param
+                if nonneg:
+                    reg_param = 0.000005
                 self.to_save['reg_param'] = reg_param
                 print('reg_param: {}'.format(reg_param))
                 decomp_method = SymmetricCPDecomp(
@@ -272,70 +305,62 @@ class GensimSandbox(object):
                     ndims=ndims,
                     rank=self.embedding_dim,
                     sess=self.sess,
-                    optimizer_type='adam',
+                    optimizer_type='adagrad' if is_glove else 'adam',
                     reg_param=reg_param,
                     nonneg=nonneg,
-                    gpu=True,
+                    gpu=self.gpu,
+                    is_glove=is_glove,
                     mean_value=mean_value,
                 )
             else:
                 decomp_method = CPDecomp(
+                    ndims=ndims,
                     shape=(len(self.model.vocab),)*ndims,
                     rank=self.embedding_dim,
                     sess=self.sess,
-                    optimizer_type='adam',
-                    reg_param=0.0,
+                    optimizer_type='adagrad' if is_glove else 'adam',
+                    reg_param=reg_param,
+                    is_glove=is_glove,
+                    nonneg=nonneg,
                 )
         print('Starting CP Decomp training')
-        decomp_method.train(sparse_tensor_batches())
-
-        U = decomp_method.U.eval(self.sess)
-        if not symmetric: 
-            V = decomp_method.V.eval(self.sess)
-            W = decomp_method.W.eval(self.sess)
-
-            lambdaU = np.linalg.norm(U, axis=1)
-            lambdaV = np.linalg.norm(V, axis=1)
-            lambdaW = np.linalg.norm(W, axis=1)
-            embedding = U / lambdaU[:, None]
-            C1 = V / lambdaV[:, None]
-            C2 = W / lambdaW[:, None]
-
-            lambda_ = lambdaU * lambdaV * lambdaW
-            D = np.diag(lambda_ ** (1/3))
-            self.C1 = np.dot(C1, D)
-            self.C2 = np.dot(C2, D)
-            self.embedding = np.dot(embedding, D)
-            pred_val = lambda x: (self.embedding[x[0]] * self.C1[x[1]] * self.C2[x[2]]).sum()
+        if ndims == 2:
+            decomp_method.train(sparse_tensor_batches(batch_size=100))
         else:
+            decomp_method.train(sparse_tensor_batches())
+
+        with self.sess.as_default():
+            U = decomp_method.U.eval()
             if nonneg:
                 sparse_embedding = U.clip(min=0.0)
                 self.embedding = sparse_embedding
             else:
                 self.embedding = U.copy()
-
+        if symmetric: 
             def mse(embedding_mat):
                 total_err = 0.0
-                for ix, val in zip(indices, values):
+                for ix, val in zip(all_indices, all_values):
                     prod = embedding_mat[ix[0]].copy()
                     for i in range(1, ndims):
                         prod *= embedding_mat[ix[i]]
                     pred_val = prod.sum()
                     total_err += (pred_val - val) ** 2
-                return total_err / len(indices)
+                return total_err / len(all_indices)
 
             err = mse(self.embedding)
             print("RMSE: {:.3f}".format(np.sqrt(err)))
             self.to_save['RMSE'] = np.sqrt(err)
-        #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
-        self.to_save['indices'] = indices
-        self.to_save['values'] = values
+            #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
+            self.to_save['all_indices'] = all_indices
+            self.to_save['all_values'] = all_values
 
-    def train_random_embedding(self, gauss=False):
+    def train_random_embedding(self, param=0.5, gauss=True):
         if gauss:
-            self.embedding = np.random.normal(0, .5, size=(len(self.model.vocab), self.embedding_dim))
+            # Gaussian(0, param)
+            self.embedding = np.random.normal(0, param, size=(len(self.model.vocab), self.embedding_dim))
         else:
-            self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - .5) * 2
+            # uniform in [-param/2, param/2]
+            self.embedding = (np.random.rand(len(self.model.vocab), self.embedding_dim) - param) * 2
 
     def train_save_sp_tensor(self, pmi=True):
         gatherer = self.get_pmi_gatherer(3)
@@ -423,14 +448,24 @@ class GensimSandbox(object):
     def evaluate_embedding(self):
         #evaluate(self.embedding, self.method, self.model)
         evaluator = EmbeddingTaskEvaluator(self.method)
-        evaluator.word_classification_tasks(print_score=True)
-        evaluator.sentiment_analysis_tasks(print_score=True)
-        evaluator.outlier_detection()
-        evaluator.analogy_tasks()
+        #evaluator.word_classification_tasks(print_score=True)
+        od_results = (0., 0.)
+        sent_anal_results = 0.
+        analogy_results = 0.
+        num_to_avg = 3.
+        for i in range(int(num_to_avg)):
+            evaluator.seed_bump += 1
+            these_od_results = evaluator.outlier_detection()
+            od_results = (od_results[0] + these_od_results[0] / num_to_avg,
+                          od_results[1] + these_od_results[1] / num_to_avg)
+            sent_anal_results += evaluator.sentiment_analysis_tasks(print_score=True) / num_to_avg
+            analogy_results += evaluator.analogy_tasks()[0] / num_to_avg  # only take semantic results
+        return (od_results, analogy_results, sent_anal_results)
 
     def save_metadata(self):
         grandparent_dir = os.path.abspath('runs/{}'.format(self.method))
         parent_dir = grandparent_dir + '/' + '{}_{}_{}'.format(self.num_articles, self.min_count, self.embedding_dim)
+        print(parent_dir)
         if not os.path.exists(grandparent_dir):
             os.mkdir(grandparent_dir)
         if not os.path.exists(parent_dir):
@@ -442,18 +477,6 @@ class GensimSandbox(object):
             f.write('Elapsed training time: {}\n'.format(time.time() - self.start_time))
             print('Elapsed training time: {}\n'.format(time.time() - self.start_time))
         write_embedding_to_file(self.embedding, self.model, parent_dir + '/vectors.txt')
-        try:
-            shutil.copyfile('../results/results_{}.txt'.format(self.method), parent_dir + '/results.txt')
-            shutil.copyfile('../results/results_{}.xlsx'.format(self.method), parent_dir + '/results.xlsx')
-        except Exception as e:
-            print('caught exception while trying to copy results: {}'.format(e))
-            import pdb; pdb.set_trace()
-        try:
-            shutil.copyfile('../results/outlier_det_{}.txt'.format(self.method), parent_dir + '/results_outlier_det.txt')
-            shutil.copyfile('../results/word_class_{}.txt'.format(self.method), parent_dir + '/results_word_class.txt')
-        except Exception as e:
-            print('caught exception while trying to copy results: {}'.format(e))
-            import pdb; pdb.set_trace()
         with open(parent_dir + '/embedding.pkl', 'wb') as f:
             dill.dump(self.embedding, f)
         try:
@@ -468,7 +491,7 @@ class GensimSandbox(object):
                 dill.dump(obj, f)
         self.create_embedding_visualization()
 
-    def train(self, experiment=''):
+    def train(self, experiment='', kwargs={}):
         self.get_model_with_vocab()
         self.start_time = time.time()
         if experiment != '':
@@ -477,31 +500,34 @@ class GensimSandbox(object):
 
         if self.method in ['random']:
             self.method += experiment
-            self.train_random_embedding(gauss=True)
+            kwargs = {param: 1.5, is_gauss: True}
+            self.train_random_embedding(**kwargs)
         elif self.method in ['cp']:  # Basic CP Decomp (from matlab)
             self.method += experiment
             self.loadmatlab()
         elif self.method in ['cp-s']:  # Symmetric CP Decomp experiments
             self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False)
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=False, **kwargs)
         elif self.method in ['cp-sn']:
             self.method += experiment
-            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True)
-        elif self.method in ['cp-s_4d']:
-            self.method += experiment
-            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=False)
-        elif self.method in ['cp-sn_4d']:
-            self.method += experiment
-            self.train_online_cp_embedding(ndims=4, symmetric=True, nonneg=True)
+            self.train_online_cp_embedding(ndims=3, symmetric=True, nonneg=True, **kwargs)
         elif self.method in ['jcp-s']:  # Joint Symmetric CP Decomp experiments
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3], dimweights=[1., 1.,], nonneg=False)
+            self.train_joint_online_cp_embedding(dimlist=[2,3], dimweights=[1., 1.,], nonneg=False, **kwargs)
         elif self.method in ['jcp-s_432']:
             self.method += experiment
-            self.train_joint_online_cp_embedding(dimlist=[2,3,4], dimweights=[2., .4, .1], nonneg=False)
+            self.train_joint_online_cp_embedding(dimlist=[2,3,4], dimweights=[2., .4, .1], nonneg=False, **kwargs)
         elif self.method in ['nnse']:
+            kwargs = {'reg_param': 0.000005, 'neg_sample_percent': 0.0, 'shift': 0.0}
+            if 'sym' in experiment:
+                kwargs['symmetric'] = True
+            else:
+                kwargs['symmetric'] = False
             self.method += experiment
-            self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=True)
+            self.train_online_cp_embedding(ndims=2, nonneg=True, **kwargs)
+        elif self.method in ['glove']:
+            self.method += experiment
+            self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=False, is_glove=True, **kwargs)
         elif self.method in ['cnn', 'cbow', 'tt', 'subspace', 'sgns']:
             self.method += experiment
             self.train_gensim_embedding()
@@ -520,9 +546,19 @@ class GensimSandbox(object):
             if np.linalg.norm(vec) == 0.0:
                 self.embedding[i][0] += 1e-4
 
-        self.evaluate_embedding()
+        try:
+            pass
+            #self.embedding /= np.linalg.norm(self.embedding, axis=1)[:, None]  # normalize vectors to unit lengths
+        except Exception as e:
+            print(e)
+            import pdb; pdb.set_trace()
+            print(e)
+        write_embedding_to_file(self.embedding, self.model, 'vectors_{}.txt'.format(self.method))
+        results = self.evaluate_embedding()
         self.save_metadata()
         print('All done training and evaluating {}!'.format(self.method))
+        print("results: {}".format(results))
+        return results
 
 
 def list_vars_in_checkpoint(dirname):
@@ -546,6 +582,7 @@ def main():
     num_articles = None
     min_count = None
     embedding_dim = None
+    gpu = False
     for arg in sys.argv:
         if arg.startswith('--method='):
             method = arg.split('--method=')[1]
@@ -555,6 +592,8 @@ def main():
             min_count = float(arg.split('--min_count=')[1])
         if arg.startswith('--embedding_dim='):
             embedding_dim = int(arg.split('--embedding_dim=')[1])
+        if arg.startswith('--gpu='):
+            gpu = bool(arg.split('--gpu=')[1])
     assert all([method, num_articles, min_count, embedding_dim]), 'Please supply all necessary parameters'
 
     print('Creating sandbox with method {}, num_articles {} and min_count {}.'.format(method, num_articles, min_count))
@@ -564,7 +603,9 @@ def main():
         num_articles=num_articles,
         embedding_dim=embedding_dim,
         min_count=min_count,
+        gpu=gpu,
     )
+    results_dict = {}
     sandbox.train(experiment='')
 
 if __name__ == '__main__':

@@ -11,6 +11,8 @@ cp-s_nodebug:
 	python3 test_gensim.py --method=cp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cp-s:
 	python3 -m pdb -c continue test_gensim.py --method=cp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+cp-s-gpu:
+	python3 -m pdb -c continue test_gensim.py --method=cp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim) --gpu=True
 cp-sn:
 	python3 -m pdb -c continue test_gensim.py --method=cp-sn --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cp-s_4d:
@@ -20,6 +22,8 @@ cp-sn_4d:
 
 jcp-s:
 	python3 -m pdb -c continue test_gensim.py --method=jcp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+jcp-s-gpu:
+	python3 -m pdb -c continue test_gensim.py --method=jcp-s --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim) --gpu=True
 jcp-s_432:
 	python3 -m pdb -c continue test_gensim.py --method=jcp-s_432 --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 
@@ -33,6 +37,8 @@ cnn:
 	python3 -m pdb -c continue test_gensim.py --method=cnn --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 nnse:
 	python3 -m pdb -c continue test_gensim.py --method=nnse --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+glove:
+	python3 -m pdb -c continue test_gensim.py --method=glove --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 
 restore_ckpt:
 	python3 -m pdb -c continue test_gensim.py --method=restore_ckpt --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)

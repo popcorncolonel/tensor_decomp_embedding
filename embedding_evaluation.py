@@ -1,3 +1,4 @@
+import dill
 import numpy as np
 import random
 import os
@@ -9,7 +10,7 @@ import time
 from gensim.models import word2vec
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
-
+from functools import lru_cache
 
 def write_embedding_to_file(embedding, model, fname='vectors.txt'):
     vectors = {}
@@ -82,6 +83,7 @@ class EmbeddingTaskEvaluator(object):
         self.method = method
         self.seed_bump = seed_bump
         random.seed(42 + self.seed_bump)
+        self._setup_analogy_graph()
 
     def get_word_classification_data_pos(self, split_type='train'):
         words_and_POSs = []
@@ -156,13 +158,15 @@ class EmbeddingTaskEvaluator(object):
             print('Word classification ({}, {}%) score: {}'.format(classification_problem, int(train_pct*100), score))
         return score
 
-    def get_analogy_data(self, split_type='train', seed=0):
+    def get_analogy_data(self, split_type='train', seed=0, is_sem_only=False):
         from embedding_benchmarks.scripts.web.datasets.analogy import fetch_google_analogy
         analogy = fetch_google_analogy()
         X = analogy['X']
         y = analogy['y']
         categories = analogy['category_high_level']
         parallel_lists = list(zip(X,y,categories))
+        if is_sem_only:
+            parallel_lists = [_ for _ in parallel_lists if _[2] == 'semantic']
         random.seed(42 + seed)
         random.shuffle(parallel_lists)
         X = [x[0] for x in parallel_lists]
@@ -213,90 +217,123 @@ class EmbeddingTaskEvaluator(object):
         y = sklearn.preprocessing.normalize(y)
         return x1s, x2s, x3s, y, query_data, answer_data, category_data
 
-    def _train_analogy_NN(self, x1s, x2s, x3s, y, verbose=False):
-        config = tf.ConfigProto(
-            allow_soft_placement=True,
-        )
-        sess = tf.Session(config=config)
+    def _setup_analogy_graph(self, reg_param=0.005):
         v1, v2, v3, v4 = (None,) * 4
         v4_hat = None
         train_op = None
         loss = None
+        with tf.device('/cpu:0'):
+            W1 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W1', dtype=tf.float64)
+            W2 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W2', dtype=tf.float64)
+            W3 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W3', dtype=tf.float64)
+            b = tf.Variable(tf.zeros([self.embedding_dim], dtype=tf.float64), name='b')
+            v1 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v1')
+            v2 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v2')
+            v3 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v3')
+            v4 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v4')
+
+            v1_e = tf.expand_dims(v1, -1)  # [?, 300] -> [?, 300, 1]
+            v2_e = tf.expand_dims(v2, -1)
+            v3_e = tf.expand_dims(v3, -1)
+            matmul1s = tf.scan(lambda _, v: tf.matmul(W1, v), v1_e)
+            matmul2s = tf.scan(lambda _, v: tf.matmul(W2, v), v2_e)
+            matmul3s = tf.scan(lambda _, v: tf.matmul(W3, v), v3_e)
+            if True:  # if add non-linearities
+                matmul1s = tf.tanh(matmul1s)
+                matmul2s = tf.tanh(matmul2s)
+                matmul3s = tf.tanh(matmul3s)
+            pred_value = -matmul1s + matmul2s + matmul3s
+            pred_value = tf.squeeze(pred_value)
+            pred_value += b
+            v4_hat = pred_value
+            v4_hat /= tf.sqrt(tf.nn.l2_loss(pred_value) * 2)  # [?, 300]
+
+            losses = tf.reduce_sum(tf.squared_difference(v4, v4_hat), axis=1)
+            self.prediction_loss = tf.reduce_mean(losses)
+            self.loss = self.prediction_loss
+            self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+
+            self.v1 = v1
+            self.v2 = v2
+            self.v3 = v3
+            self.v4 = v4
+            self.W1 = W1
+            self.W2 = W2
+            self.W3 = W3
+            self._create_analogy_ops(reg_param)
+
+    def _create_analogy_ops(self, reg_param, regularize_all=False): 
+            # regularization
+            self.reg_param = reg_param
+            if regularize_all:
+                self.reg_loss = (1/3) * reg_param * (tf.nn.l2_loss(self.W1) + tf.nn.l2_loss(self.W2) + tf.nn.l2_loss(self.W3)) 
+            else:
+                self.reg_loss = reg_param * tf.nn.l2_loss(self.W3)
+            self.loss += self.reg_loss
+            self.train_op = self.optimizer.minimize(self.loss, self.global_step)
+
+    def _train_analogy_NN(self, x1s, x2s, x3s, y, verbose=False, iter_pct=1.0):
+        def chunker(seq, size):
+            return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+        config = tf.ConfigProto(
+            allow_soft_placement=True,
+        )
+        sess = tf.Session(config=config)
         with sess.as_default():
-            with tf.device('/cpu:0'):
-                W1 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W1', dtype=tf.float64)
-                W2 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W2', dtype=tf.float64)
-                W3 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W3', dtype=tf.float64)
-                b = tf.Variable(tf.zeros([self.embedding_dim], dtype=tf.float64), name='b')
-                v1 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v1')
-                v2 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v2')
-                v3 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v3')
-                v4 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v4')
+            sess.run(tf.global_variables_initializer())
+            n_iters = 1
+            n_iters = max(1, int(n_iters * iter_pct))
+            print('n_iters = {}'.format(n_iters))
+            for _ in range(n_iters):
+                if verbose:
+                    print('running batches...')
+                for x1s_batch, x2s_batch, x3s_batch, y_batch in zip(chunker(x1s, 25), chunker(x2s, 25), chunker(x3s, 25), chunker(y, 25)):
+                    _, loss_val, step, p_loss, r_loss = sess.run([
+                        self.train_op,
+                        self.loss,
+                        self.global_step,
+                        self.prediction_loss,
+                        self.reg_loss,
+                    ], feed_dict={
+                        self.v1: x1s_batch,
+                        self.v2: x2s_batch,
+                        self.v3: x3s_batch,
+                        self.v4: y_batch,
+                    })
+                    if True:  # verbose:
+                        if step % 5 == 0:
+                            print('loss at step {}: {:.3f} ({:.3f},{:.3f} = pred,reg loss)'.format(step, loss_val, p_loss, r_loss))
+            print('Prediction loss: {:.2f}, Regularization loss: {:.2f} (at end of training)'.format(p_loss, r_loss))
+        return self.W1.eval(sess), self.W2.eval(sess), self.W3.eval(sess)
 
-                v1_e = tf.expand_dims(v1, -1)  # [?, 300] -> [?, 300, 1]
-                v2_e = tf.expand_dims(v2, -1)
-                v3_e = tf.expand_dims(v3, -1)
-                matmul1s = tf.scan(lambda _, v: tf.matmul(W1, v), v1_e)
-                matmul2s = tf.scan(lambda _, v: tf.matmul(W2, v), v2_e)
-                matmul3s = tf.scan(lambda _, v: tf.matmul(W3, v), v3_e)
-                pred_value = -matmul1s + matmul2s + matmul3s
-                pred_value = tf.squeeze(pred_value)
-                v4_hat = pred_value
-                v4_hat /= tf.sqrt(tf.nn.l2_loss(pred_value) * 2)  # [?, 300]
-
-                losses = tf.reduce_sum(tf.squared_difference(v4, v4_hat), axis=1)
-                prediction_loss = tf.reduce_mean(losses)
-                loss = prediction_loss
-
-                # regularization
-                reg_param = .001
-                #reg_loss = (1/3) * reg_param * (tf.nn.l2_loss(W1) + tf.nn.l2_loss(W2) + tf.nn.l2_loss(W3)) 
-                reg_loss = reg_param * tf.nn.l2_loss(W3)
-                if True:
-                    loss += reg_loss
-
-                global_step = tf.Variable(0, name='global_step', trainable=False)
-                optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-                train_op = optimizer.minimize(loss, global_step)
-
-                sess.run(tf.global_variables_initializer())
-
-                def chunker(seq, size):
-                    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-                n_iters = 1
-                for _ in range(n_iters):
-                    if verbose:
-                        print('running batches...')
-                    for x1s_batch, x2s_batch, x3s_batch, y_batch in zip(chunker(x1s, 25), chunker(x2s, 25), chunker(x3s, 25), chunker(y, 25)):
-                        _, loss_val, step, p_loss, r_loss = sess.run([train_op, loss, global_step, prediction_loss, reg_loss], feed_dict={
-                            v1: x1s_batch,
-                            v2: x2s_batch,
-                            v3: x3s_batch,
-                            v4: y_batch,
-                        })
-                        if verbose:
-                            if step % 20 == 0:
-                                print('loss at step {}: {}'.format(step, loss_val))
-                print('Prediction loss: {:.2f}, Regularization loss: {:.2f} (at end of training)'.format(p_loss, r_loss))
-        return sess, W1.eval(sess), W2.eval(sess), W3.eval(sess)
-
-    def analogy_tasks(self, train_pct=1.0, verbose=True):
-        '''
-        Currently not working for any embedding. 
-        '''
-        x1s, x2s, x3s, y, word_X_train, word_y_train, cats_train = self.get_analogy_data('train', seed=self.seed_bump)
-        x1s_test, x2s_test, x3s_test, y_test, word_X_test, word_y_test, categories = self.get_analogy_data('test', seed=self.seed_bump)
+    def analogy_tasks(self, train_pct=1.0, verbose=True, reg_param=.001, is_sem_only=False, iter_pct=1.0, regularize_all=False):
+        x1s, x2s, x3s, y, word_X_train, word_y_train, cats_train = self.get_analogy_data(
+            'train',
+            seed=self.seed_bump,
+            is_sem_only=is_sem_only,
+        )
+        x1s_test, x2s_test, x3s_test, y_test, word_X_test, word_y_test, categories = self.get_analogy_data(
+            'test',
+            seed=self.seed_bump,
+            is_sem_only=is_sem_only,
+        )
         print('train_pct: {}'.format(train_pct * 100))
-        if verbose:
-            print("{} training words".format(len(x1s)))
-            print("{} testing words".format(len(x1s_test)))
         same_analogies = [(trip, ans) for (trip, ans) in zip(word_X_test, word_y_test) if trip in word_X_train and ans in word_y_train]
         assert len(same_analogies) == 0
         x1s = x1s[:int(train_pct * len(x1s))]
         x2s = x2s[:int(train_pct * len(x2s))]
         x3s = x3s[:int(train_pct * len(x3s))]
         y = y[:int(train_pct * len(y))]
-        sess, W1, W2, W3 = self._train_analogy_NN(x1s, x2s, x3s, y)
+        if verbose:
+            print("{} training words".format(len(x1s)))
+            print("{} testing words".format(len(x1s_test)))
+        if reg_param != self.reg_param:
+            print('creating a new set of analogy ops due to change in reg_param')
+            print('new reg_param: {}'.format(reg_param))
+            print('regularize_all: {}'.format(regularize_all))
+            self._create_analogy_ops(reg_param, regularize_all=regularize_all)
+        W1, W2, W3 = self._train_analogy_NN(x1s, x2s, x3s, y, iter_pct=iter_pct)
         print('learned NN. evaluating...')
 
         correct_syn = 0
@@ -343,9 +380,15 @@ class EmbeddingTaskEvaluator(object):
             else:
                 raise ValueError('unrecognized category')
 
-        print('Semantic Analogy Accuracy: {}'.format(correct_sem / total_sem))
-        print('Syntactic Analogy Accuracy: {}'.format(correct_syn / total_syn))
-        return (correct_sem / total_sem, correct_syn / total_syn)
+        sem_score = 0.
+        syn_score = 0.
+        if total_sem != 0:
+            sem_score = correct_sem / total_sem
+            print('Semantic Analogy Accuracy: {}'.format(sem_score))
+        if total_syn != 0:
+            syn_score = correct_syn / total_syn
+            print('Syntactic Analogy Accuracy: {}'.format(syn_score))
+        return sem_score, syn_score
 
     def get_sent_class_data_old(self, split_type='train'):
         pos_Xy = []
@@ -423,6 +466,7 @@ class EmbeddingTaskEvaluator(object):
             print('Sentiment classification score: {}'.format(score))
         return score
 
+    @lru_cache(maxsize=32)
     def outlier_detection(self, verbose=True, n=3):
         from wikisem500.src.evaluator import Evaluator
         from wikisem500.src.embeddings import WrappedEmbedding
@@ -460,8 +504,15 @@ class EmbeddingTaskEvaluator(object):
 
 if __name__ == '__main__':
     method = 'cbow'
-    evaluator = EmbeddingTaskEvaluator(method)
-    evaluator.word_classification_tasks(print_score=True)
-    evaluator.analogy_tasks()
-    sys.exit()
+    if False:
+        evaluator = EmbeddingTaskEvaluator(method)
+        evaluator.word_classification_tasks(print_score=True)
+        evaluator.analogy_tasks()
+        sys.exit()
+    else:
+        fname = 'wikimodel_{}_{}'.format(int(1e5), 1000)
+        model = dill.load(fname)
+        with open('runs/{}/{}_{}_300'.format(method, int(1e5), 1000), 'rb') as f:
+            embedding = dill.load(f)
+        evaluate(embedding, method, model)
 

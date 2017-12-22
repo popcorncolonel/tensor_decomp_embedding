@@ -23,13 +23,14 @@ class WordEmbedding(object):
         self.context_size = context_size
         self.method = method
         self.gpu = gpu
+        self.gpu = False
 
         config = tf.ConfigProto(
             allow_soft_placement=True,
         )
         self.sess = tf.Session(config=config)
         with self.sess.as_default():
-            with tf.device('/{}'.format('gpu:0' if gpu else 'cpu:0')):
+            with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
                 self.create_embedding_layer()
@@ -218,7 +219,7 @@ class WordEmbedding(object):
             self.fc_W = tf.Variable(
                 tf.truncated_normal(
                     shape=[len(self.vocab), self.embedding_size],
-                    stddev=0.01,
+                    stddev=1. / np.sqrt(self.embedding_size),
                     dtype=tf.float32,
                 ),
                 name='W',
@@ -232,7 +233,7 @@ class WordEmbedding(object):
         self.create_loss_fn(self.fc_W, self.fc_b, vocab_model)
 
     def create_loss_fn(self, fc_W, fc_b, vocab_model):
-        with tf.name_scope('loss'), tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
+        with tf.name_scope('loss'), tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
             sampled_candidates, true_expected_count, sampled_expected_count = tf.nn.learned_unigram_candidate_sampler(
                 true_classes=self.input_y,
                 num_true=1,
@@ -255,19 +256,35 @@ class WordEmbedding(object):
                     remove_accidental_hits=True,
                     sampled_values=sampled_values,
                 )
+                self.loss = tf.reduce_mean(losses)
             else:
+                h = tf.squeeze(tf.cast(self.h, tf.float32), axis=1)
+                per_word_losses = [
+                    tf.nn.nce_loss(
+                        weights=fc_W,
+                        biases=fc_b,
+                        inputs=h,
+                        labels=tf.expand_dims(tf.gather(tf.transpose(self.input_x), i), 1),
+                        num_sampled=self.vocab_model.negative // self.context_size,
+                        num_classes=len(vocab_model.vocab),
+                        remove_accidental_hits=True,
+                    )
+                    for i in range(self.context_size)
+                ]
+                self.loss = sum(tf.reduce_mean(losses) for losses in per_word_losses) / self.context_size
+                """
                 losses = tf.nn.nce_loss(
                     weights=fc_W,
                     biases=fc_b,
-                    inputs=tf.squeeze(tf.cast(self.h, tf.float32), axis=1),
+                    inputs=h,
                     labels=self.input_x,
                     num_sampled=self.vocab_model.negative,
                     num_classes=len(vocab_model.vocab),
                     num_true=self.context_size,
                     remove_accidental_hits=True,
-                    sampled_values=sampled_values,
                 )
-            self.loss = tf.reduce_mean(losses)
+                self.loss = tf.reduce_mean(losses)
+                """
             #self.loss += .01 * (tf.nn.l2_loss(self.context_embedding) + tf.nn.l2_loss(fc_W))  # regularization
 
     def get_embedding_matrix1(self):
@@ -350,7 +367,7 @@ class WordEmbedding(object):
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.step = 0
 
-        with tf.device('/{}'.format('gpu:0' if self.gpu else 'cpu:0')):
+        with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
             optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
             grads_and_vars = optimizer.compute_gradients(self.loss)
 
