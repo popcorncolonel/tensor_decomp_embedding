@@ -451,16 +451,16 @@ class GensimSandbox(object):
         #evaluator.word_classification_tasks(print_score=True)
         od_results = (0., 0.)
         sent_anal_results = 0.
-        analogy_results = 0.
-        num_to_avg = 3.
+        word_class_results = 0.
+        num_to_avg = 1.
         for i in range(int(num_to_avg)):
             evaluator.seed_bump += 1
             these_od_results = evaluator.outlier_detection()
             od_results = (od_results[0] + these_od_results[0] / num_to_avg,
                           od_results[1] + these_od_results[1] / num_to_avg)
             sent_anal_results += evaluator.sentiment_analysis_tasks(print_score=True) / num_to_avg
-            analogy_results += evaluator.analogy_tasks()[0] / num_to_avg  # only take semantic results
-        return (od_results, analogy_results, sent_anal_results)
+            word_class_results += evaluator.word_classification_tasks() / num_to_avg
+        return (od_results, word_class_results, sent_anal_results)
 
     def save_metadata(self):
         grandparent_dir = os.path.abspath('runs/{}'.format(self.method))
@@ -605,28 +605,7 @@ def main():
         min_count=min_count,
         gpu=gpu,
     )
-    results_dict = {}
-    if method == 'cp-s':
-        for _ in range(10):
-            if _ == 0:
-                neg_sample_percent = 0.0
-                reg_param = 0.0
-                shift = 0.0
-            else:
-                neg_sample_percent = np.random.uniform(0.0, 0.35)
-                reg_param = np.random.uniform(0.000001, 0.0001)
-                shift = np.random.uniform(0.0, 25.)
-            kwargs = dict(
-                neg_sample_percent=neg_sample_percent,
-                reg_param=reg_param,
-                shift=shift,
-            )
-            results_dict[(neg_sample_percent, reg_param, shift)] = sandbox.train(experiment='{:.4f}_{:.4f}_{:.4f}'.format(neg_sample_percent, reg_param, shift), kwargs=kwargs)
-            print(results_dict)
-            import pdb; pdb.set_trace()
-            print(results_dict)
-    else:
-        sandbox.train(experiment='')
+    sandbox.train(experiment='')
 
 if __name__ == '__main__':
     main()
