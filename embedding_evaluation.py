@@ -83,7 +83,7 @@ class EmbeddingTaskEvaluator(object):
         self.method = method
         self.seed_bump = seed_bump
         random.seed(42 + self.seed_bump)
-        self._setup_analogy_graph()
+        self._setup_analogy_graph(multiplicative=True)
 
     def get_word_classification_data_pos(self, split_type='train'):
         words_and_POSs = []
@@ -204,6 +204,11 @@ class EmbeddingTaskEvaluator(object):
             query_data = query_words[split_point:]
             answer_data = answer_words[split_point:]
             category_data = valid_categories[split_point:]
+        elif split_type == 'all':
+            data = valid_pairs
+            query_data = query_words
+            answer_data = answer_words
+            category_data = valid_categories
         else:
             raise ValueError('Unrecognized split type {}'.format(split_type))
         x1s = np.array([x[0][0] for x in data])
@@ -217,7 +222,7 @@ class EmbeddingTaskEvaluator(object):
         y = sklearn.preprocessing.normalize(y)
         return x1s, x2s, x3s, y, query_data, answer_data, category_data
 
-    def _setup_analogy_graph(self, reg_param=0.005):
+    def _setup_analogy_graph(self, reg_param=0.005, multiplicative=False):
         v1, v2, v3, v4 = (None,) * 4
         v4_hat = None
         train_op = None
@@ -226,7 +231,8 @@ class EmbeddingTaskEvaluator(object):
             W1 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W1', dtype=tf.float64)
             W2 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W2', dtype=tf.float64)
             W3 = tf.Variable(initial_value=np.identity(self.embedding_dim), name='W3', dtype=tf.float64)
-            b = tf.Variable(tf.zeros([self.embedding_dim], dtype=tf.float64), name='b')
+            #b = tf.Variable(tf.zeros([self.embedding_dim], dtype=tf.float64), name='b')
+            b = tf.Variable(tf.random_uniform(shape=[self.embedding_dim], minval=-1., maxval=1., dtype=tf.float64), name='b')
             v1 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v1')
             v2 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v2')
             v3 = tf.placeholder(tf.float64, shape=[None, self.embedding_dim], name='v3')
@@ -238,13 +244,17 @@ class EmbeddingTaskEvaluator(object):
             matmul1s = tf.scan(lambda _, v: tf.matmul(W1, v), v1_e)
             matmul2s = tf.scan(lambda _, v: tf.matmul(W2, v), v2_e)
             matmul3s = tf.scan(lambda _, v: tf.matmul(W3, v), v3_e)
-            if True:  # if add non-linearities
+            if False:  # if add non-linearities
                 matmul1s = tf.tanh(matmul1s)
                 matmul2s = tf.tanh(matmul2s)
                 matmul3s = tf.tanh(matmul3s)
-            pred_value = -matmul1s + matmul2s + matmul3s
-            pred_value = tf.squeeze(pred_value)
-            pred_value += b
+            if multiplicative:
+                pred_value = matmul1s * matmul2s * matmul3s
+                pred_value = tf.squeeze(pred_value)
+            else:
+                pred_value = -matmul1s + matmul2s + matmul3s
+                pred_value = tf.squeeze(pred_value)
+                pred_value += b
             v4_hat = pred_value
             v4_hat /= tf.sqrt(tf.nn.l2_loss(pred_value) * 2)  # [?, 300]
 
@@ -261,6 +271,7 @@ class EmbeddingTaskEvaluator(object):
             self.W1 = W1
             self.W2 = W2
             self.W3 = W3
+            self.b = b
             self._create_analogy_ops(reg_param)
 
     def _create_analogy_ops(self, reg_param, regularize_all=False): 
@@ -305,9 +316,10 @@ class EmbeddingTaskEvaluator(object):
                         if step % 5 == 0:
                             print('loss at step {}: {:.3f} ({:.3f},{:.3f} = pred,reg loss)'.format(step, loss_val, p_loss, r_loss))
             print('Prediction loss: {:.2f}, Regularization loss: {:.2f} (at end of training)'.format(p_loss, r_loss))
-        return self.W1.eval(sess), self.W2.eval(sess), self.W3.eval(sess)
+        return self.W1.eval(sess), self.W2.eval(sess), self.W3.eval(sess), self.b.eval(sess)
 
-    def analogy_tasks(self, train_pct=1.0, verbose=True, reg_param=.001, is_sem_only=False, iter_pct=1.0, regularize_all=False):
+    def analogy_tasks(self, train_pct=1.0, verbose=True, reg_param=.001, is_sem_only=False, iter_pct=1.0, regularize_all=False,
+                      multiplicative=False):
         x1s, x2s, x3s, y, word_X_train, word_y_train, cats_train = self.get_analogy_data(
             'train',
             seed=self.seed_bump,
@@ -333,26 +345,13 @@ class EmbeddingTaskEvaluator(object):
             print('new reg_param: {}'.format(reg_param))
             print('regularize_all: {}'.format(regularize_all))
             self._create_analogy_ops(reg_param, regularize_all=regularize_all)
-        W1, W2, W3 = self._train_analogy_NN(x1s, x2s, x3s, y, iter_pct=iter_pct)
+        W1, W2, W3, b = self._train_analogy_NN(x1s, x2s, x3s, y, iter_pct=iter_pct)
         print('learned NN. evaluating...')
 
         correct_syn = 0
         total_syn = 0
         correct_sem = 0
         total_sem = 0
-        def get_closest_vocab_word(predicted, query):
-            best_word = None
-            best_vect = None
-            best_dist = float('-inf')
-            for word, vect in self.embedding_dict.items():
-                if word not in query:
-                    dist = np.dot(vect, predicted)  # cosine similarity
-                    dist /= (np.linalg.norm(vect) * np.linalg.norm(predicted))
-                    if dist > best_dist:
-                        best_word = word
-                        best_vect = vect
-                        best_dist = dist
-            return best_word, best_vect
 
         ordered_embedding_words = []
         embedding_mat = []
@@ -363,7 +362,10 @@ class EmbeddingTaskEvaluator(object):
         P1 = x1s_test
         P2 = x2s_test
         P3 = x3s_test
-        predictions = -np.dot(W1, P1.T) + np.dot(W2, P2.T) + np.dot(W3, P3.T)
+        if multiplicative:
+            predictions = np.dot(W1, P1.T) * np.dot(W2, P2.T) * np.dot(W3, P3.T)
+        else:
+            predictions = -np.dot(W1, P1.T) + np.dot(W2, P2.T) + np.dot(W3, P3.T) + np.expand_dims(b, axis=1)
         predictions = sklearn.preprocessing.normalize(predictions)
         dots = np.dot(embedding_mat, predictions)
         argmaxes = np.argmax(dots, axis=0)
@@ -501,18 +503,64 @@ class EmbeddingTaskEvaluator(object):
         opp, accuracy = score_embedding(embedding, dataset)
         return opp, accuracy
 
+    def deterministic_analogies(self):
+        x1s, x2s, x3s, y, word_X, word_y, cats = self.get_analogy_data('all', is_sem_only=False)
+        correct_syn = 0
+        total_syn = 0
+        correct_sem = 0
+        total_sem = 0
+
+        ordered_embedding_words = []
+        embedding_mat = []
+        for word, vect in self.embedding_dict.items():
+            ordered_embedding_words.append(word)
+            embedding_mat.append(vect)
+        embedding_mat = np.array(embedding_mat)  # |V| x k
+        P1 = x1s
+        P2 = x2s
+        P3 = x3s
+        predictions = -P1.T + P2.T + P3.T
+        predictions = sklearn.preprocessing.normalize(predictions)
+        dots = np.dot(embedding_mat, predictions)
+        argmaxes = np.argmax(dots, axis=0)
+        predicted_words = [ordered_embedding_words[i] for i in argmaxes]
+        for predicted_word, correct_word, cat in zip(predicted_words, word_y, cats):
+            if cat == 'syntactic':
+                if predicted_word == correct_word:
+                    correct_syn += 1
+                total_syn += 1
+            elif cat == 'semantic':
+                if predicted_word == correct_word:
+                    correct_sem += 1
+                total_sem += 1
+            else:
+                raise ValueError('unrecognized category')
+
+        sem_score = 0.
+        syn_score = 0.
+        if total_sem != 0:
+            sem_score = correct_sem / total_sem
+            print('Semantic Analogy Accuracy: {}'.format(sem_score))
+        if total_syn != 0:
+            syn_score = correct_syn / total_syn
+            print('Syntactic Analogy Accuracy: {}'.format(syn_score))
+        return sem_score, syn_score
+
+
 
 if __name__ == '__main__':
-    method = 'cbow'
-    if False:
-        evaluator = EmbeddingTaskEvaluator(method)
-        evaluator.word_classification_tasks(print_score=True)
-        evaluator.analogy_tasks()
+    method = 'glove'
+    if True:
+        for method in ['random', 'nnse', 'glove', 'cbow', 'sgns', 'cp-s', 'jcp-s']:
+            evaluator = EmbeddingTaskEvaluator(method)
+            evaluator.deterministic_analogies()
+            print("^ {}".format(method))
         sys.exit()
     else:
         fname = 'wikimodel_{}_{}'.format(int(1e5), 1000)
-        model = dill.load(fname)
-        with open('runs/{}/{}_{}_300'.format(method, int(1e5), 1000), 'rb') as f:
+        with open(fname, 'rb') as f:
+            model = dill.load(f)
+        with open('runs/{}/{}_{}_300/embedding.pkl'.format(method, int(1e5), 1000), 'rb') as f:
             embedding = dill.load(f)
         evaluate(embedding, method, model)
 

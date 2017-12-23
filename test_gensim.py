@@ -606,7 +606,27 @@ def main():
         gpu=gpu,
     )
     results_dict = {}
-    sandbox.train(experiment='')
+    if method == 'cp-s':
+        for _ in range(10):
+            if _ == 0:
+                neg_sample_percent = 0.0
+                reg_param = 0.0
+                shift = 0.0
+            else:
+                neg_sample_percent = np.random.uniform(0.0, 0.35)
+                reg_param = np.random.uniform(0.000001, 0.0001)
+                shift = np.random.uniform(0.0, 25.)
+            kwargs = dict(
+                neg_sample_percent=neg_sample_percent,
+                reg_param=reg_param,
+                shift=shift,
+            )
+            results_dict[(neg_sample_percent, reg_param, shift)] = sandbox.train(experiment='{:.4f}_{:.4f}_{:.4f}'.format(neg_sample_percent, reg_param, shift), kwargs=kwargs)
+            print(results_dict)
+            import pdb; pdb.set_trace()
+            print(results_dict)
+    else:
+        sandbox.train(experiment='')
 
 if __name__ == '__main__':
     main()

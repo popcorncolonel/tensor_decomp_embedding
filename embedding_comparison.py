@@ -138,13 +138,20 @@ class EmbeddingComparison(object):
             score_dict[method] = score
         return score_dict
 
-    def compare_analogy(self, train_pct, iter_pct=1.0, is_sem_only=False, reg_param=0.001, regularize_all=False):
+    def compare_analogy(self, train_pct, iter_pct=1.0, is_sem_only=False, reg_param=0.001, regularize_all=False,
+                        multiplicative=False):
         print("\n==================================")
         sem_dict = {}
         syn_dict = {}
         for evaluator in self.evaluators:
             self.print_method(evaluator.method)
-            (sem_score, syn_score) = evaluator.analogy_tasks(train_pct=train_pct, iter_pct=iter_pct, is_sem_only=is_sem_only, reg_param=reg_param, regularize_all=regularize_all)
+            (sem_score, syn_score) = evaluator.analogy_tasks(train_pct=train_pct,
+                iter_pct=iter_pct,
+                is_sem_only=is_sem_only,
+                reg_param=reg_param,
+                regularize_all=regularize_all,
+                multiplicative=multiplicative,
+            )
             print("Analogy sem/syn scores: {}".format((sem_score, syn_score)))
             method = evaluator.method
             sem_dict[method] = sem_score
@@ -286,6 +293,8 @@ class EmbeddingComparison(object):
         print(avg_df)
         print('Saved to {}'.format(excel_fname))
         print('Num runs: {}'.format(num_runs))
+        import pdb; pdb.set_trace()
+        print(np.std(all_dfs, axis=2))
 
         return avg_df
 
@@ -299,7 +308,7 @@ if __name__ == '__main__':
     min_count = 1000
     if comparison_name == '1e5':
         num_sents = int(float(comparison_name))
-        methods = ['random', 'cbow', 'sgns', 'glove', 'nnse', 'cp-s', 'jcp-s']
+        methods = ['random', 'cbow', 'sgns', 'glove_sym', 'nnse', 'cp-s', 'jcp-s', 'cp-s_best']
         embedding_dim = 300
     elif comparison_name == 'web':
         num_sents = int(1e5)
@@ -332,19 +341,27 @@ if __name__ == '__main__':
         n_random_trials = 1
         def loguniform(low=1e-6, high=1, size=None):
             return np.exp(np.random.uniform(np.log(low), np.log(high), size))
-        for _ in range(7):
-            reg_param = loguniform(.00005, 0.005)  # regulate W3
+        for _ in range(10):
+            reg_param = loguniform(.001, 0.01)  # regulate W3
             #reg_param = 0.0030505989722323123  # pretty high reg param
-            iter_pct = int(np.random.uniform(5, 50))
+            iter_pct = int(np.random.uniform(2, 10))
             for regularize_all in [False]:
+                multiplicative = True
                 mean_scores = {method: np.array([0., 0., 0., 0.], dtype=np.float64) for method in methods}
                 for _ in range(n_random_trials):
                     for evaluator in comparator.evaluators:
                         evaluator.seed_bump += 1
-                    scores1 = comparator.compare_analogy(0.1, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
-                    scores2 = comparator.compare_analogy(0.3, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
-                    scores3 = comparator.compare_analogy(0.5, is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
-                    scores5 = comparator.compare_analogy(1., is_sem_only=False, iter_pct=iter_pct, reg_param=reg_param, regularize_all=regularize_all)[0]
+                    kwargs = dict(
+                            is_sem_only=False,
+                            iter_pct=iter_pct,
+                            reg_param=reg_param,
+                            regularize_all=regularize_all,
+                            multiplicative=multiplicative,
+                    )
+                    scores1 = comparator.compare_analogy(0.1, **kwargs)[0]
+                    scores2 = comparator.compare_analogy(0.3, **kwargs)[0]
+                    scores3 = comparator.compare_analogy(0.5, **kwargs)[0]
+                    scores5 = comparator.compare_analogy(1.0, **kwargs)[0]
                     for method in methods:
                         mean_scores[method] += np.array([
                             scores1[method], scores2[method], scores3[method], scores5[method]
@@ -352,15 +369,16 @@ if __name__ == '__main__':
                 for method in methods:
                     mean_scores[method] = ["{:.4f}".format(x) for x in mean_scores[method]]
                 results_dict[(iter_pct, regularize_all, reg_param)] = mean_scores
-                with open('hparams/{}_{}_{:.4f}_tanh.txt'.format(iter_pct, regularize_all, reg_param), 'w') as f:
+                with open('hparams/{}_{}_{:.4f}_multiplicative.txt'.format(iter_pct, regularize_all, reg_param), 'a') as f:
                     for k in mean_scores:
                         print("{}: {}\n".format(k, mean_scores[k]), file=f)
             print('time so far: {}'.format(time.time() - t))
         for k in results_dict:
             print("{}: {}".format(k, results_dict[k]))
         print('welp. that took {:.4f} seconds'.format(time.time() - t))
-        print("with biases and with tanh, {} random restarts".format(n_random_trials))
-        print("hiiiigh iter_pct's")
+        print("with biases and with no tanh, {} random restarts".format(n_random_trials))
+        print("high iter_pct's, fixed biases")
+        print("MULTIPLICATIVE")
         import pdb; pdb.set_trace()
         sys.exit()
 
