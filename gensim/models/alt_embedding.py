@@ -33,6 +33,18 @@ class WordEmbedding(object):
             with tf.device('/{}'.format('gpu:1' if self.gpu else 'cpu:0')):
                 self.input_x = tf.placeholder(tf.int32, [None, context_size], name='input_x')
                 self.input_y = tf.placeholder(tf.int64, [None, 1], name='input_y') # Index of correct word. (list for minibatching)
+                if self.method == 'hosg':
+                    self.relation_matrix = tf.Variable(
+                        tf.truncated_normal(
+                            shape=[context_size, self.embedding_size],  # 10 x 300
+                            mean=1.0,
+                            stddev=1. / np.sqrt(self.embedding_size),
+                            dtype=tf.float32,
+                        ),
+                        name='HOSG_relation_matrix',
+                        dtype=tf.float32,
+                    )
+
                 self.create_embedding_layer()
                 self.create_fully_connected_layer_and_loss_fn(vocab_model)
         self.write_graph()
@@ -68,10 +80,10 @@ class WordEmbedding(object):
             f.write('{} {}\n'.format(count, self.embedding_size))  # write the number of vects
             f.write(content)
 
+    def embed_with_hosg(self, embedded_target):
+        self.h = embedded_target
+
     def embed_with_sgns(self, embedded_target):
-        '''
-        Given the embedding of the input, embeds the hidden layer with the formulation in CBOW
-        '''
         self.h = embedded_target
 
     def embed_with_cbow(self, embedded_chars):
@@ -185,9 +197,9 @@ class WordEmbedding(object):
                 tf.random_uniform([len(self.vocab), self.embedding_size], minval=-1, maxval=1),
                 name='embedding_matrix'
             )
-            self.context_embedding = C  # aka the first embedding matrix in the NN. If SGNS, this is not actually the context embedding!
+            self.context_embedding = C  # aka the first embedding matrix in the NN. If SG NS, this is not actually the context embedding!
             # Embed the input. The embedding lookup takes in a list of numbers (not one-hot vectors).
-            self.embedded_chars = tf.nn.embedding_lookup(C, self.input_x)
+            self.embedded_chars = tf.nn.embedding_lookup(C, self.input_x)  # 
 
             if self.method == 'subspace':  # Subspace
                 print("Embedding the context via subspace projection.")
@@ -195,6 +207,10 @@ class WordEmbedding(object):
             elif self.method == 'tensor':  # Tensor Train
                 print("Embedding the context via Tensor Train.")
                 self.embed_with_tensor_train(r=15)
+            elif self.method == 'hosg':  # SGNS tensor baseline
+                print("Embedding the context with HOSG")
+                embedded_target = tf.nn.embedding_lookup(C, self.input_y)
+                self.embed_with_hosg(embedded_target)
             elif self.method == 'cnn':  # CNN
                 print("Embedding the context with CNN")
                 self.embed_with_cnn(self.embedded_chars)
@@ -244,8 +260,8 @@ class WordEmbedding(object):
             )
             sampled_values = (sampled_candidates, true_expected_count, sampled_expected_count)
 
-            if self.method != 'sgns':
-                losses = tf.nn.nce_loss(
+            if self.method not in ['sgns', 'hosg']:
+                losses = tf.nn.nce_loss(  # CBOW et al -- things that want to sample from the target distribution not the contexts
                 #losses=tf.nn.sampled_softmax_loss(
                     weights=fc_W,
                     biases=fc_b,
@@ -258,12 +274,13 @@ class WordEmbedding(object):
                 )
                 self.loss = tf.reduce_mean(losses)
             else:
+                all_losses = []
                 h = tf.squeeze(tf.cast(self.h, tf.float32), axis=1)
                 per_word_losses = [
                     tf.nn.nce_loss(
                         weights=fc_W,
                         biases=fc_b,
-                        inputs=h,
+                        inputs=h * tf.gather(self.relation_matrix, i) if self.method == 'hosg' else h,  # batch_size x 300
                         labels=tf.expand_dims(tf.gather(tf.transpose(self.input_x), i), 1),
                         num_sampled=self.vocab_model.negative // self.context_size,
                         num_classes=len(vocab_model.vocab),

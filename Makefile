@@ -31,6 +31,8 @@ cbow:
 	python3 -m pdb -c continue test_gensim.py --method=cbow --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 sgns:
 	python3 -m pdb -c continue test_gensim.py --method=sgns --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
+hosg:
+	python3 -m pdb -c continue test_gensim.py --method=hosg --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 svd:
 	python3 -m pdb -c continue test_gensim.py --method=svd --min_count=$(min_count) --num_articles=$(num_articles) --embedding_dim=$(embedding_dim)
 cnn:

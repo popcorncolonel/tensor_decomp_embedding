@@ -368,7 +368,7 @@ class Word2Vec(utils.SaveLoad):
             self, sentences=None, size=100, alpha=0.025, window=5, min_count=5,
             max_vocab_size=None, sample=1e-3, seed=1, workers=3, min_alpha=0.0001,
             sg=0, hs=0, negative=5, cbow_mean=1, hashfxn=hash, iter=5, null_word=0,
-            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0, tt=0, cbow=0, cnn=0, sgns=0):
+            trim_rule=None, sorted_vocab=1, batch_words=MAX_WORDS_IN_BATCH, subspace=0, tt=0, cbow=0, cnn=0, sgns=0, hosg=0):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -450,6 +450,7 @@ class Word2Vec(utils.SaveLoad):
         self.subspace = int(subspace)
         self.tt = int(tt)
         self.cbow = int(cbow)
+        self.hosg = int(hosg)
         self.sgns = int(sgns)
         self.cnn = int(cnn)
         self.cum_table = None  # for negative sampling
@@ -770,7 +771,7 @@ class Word2Vec(utils.SaveLoad):
 
         """
 
-        if self.subspace or self.tt or self.cbow or self.cnn or self.sgns:
+        if self.subspace or self.tt or self.cbow or self.cnn or self.sgns or self.hosg:
             assert batches
             print("using tf word embedding method. n_iters in batch generator: {}".format(self.iter))
 
@@ -802,6 +803,14 @@ class Word2Vec(utils.SaveLoad):
                     embedding_size=self.vector_size,
                     context_size=2*self.window,
                     method='sgns',
+                    gpu=gpu,
+                )
+            elif self.hosg:
+                embedding_model = WordEmbedding(
+                    vocab_model=self,
+                    embedding_size=self.vector_size,
+                    context_size=2*self.window,
+                    method='hosg',
                     gpu=gpu,
                 )
             elif self.cnn:

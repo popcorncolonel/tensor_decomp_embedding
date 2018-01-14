@@ -318,6 +318,10 @@ if __name__ == '__main__':
         num_sents = int(1e5)
         methods = ['random', 'glove', 'glove_sym']
         embedding_dim = 300
+    elif comparison_name == 'hosg':
+        num_sents = int(1e5)
+        methods = ['random', 'cp-s', 'jcp-s', 'hosg']
+        embedding_dim = 300
     elif comparison_name == 'learn_nn_hparams':
         num_sents = int(1e5)
         methods = ['random', 'glove', 'nnse', 'cp-s', 'jcp-s']

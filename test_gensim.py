@@ -85,6 +85,7 @@ class GensimSandbox(object):
         model.tt = 0
         model.cbow = 0
         model.sgns = 0
+        model.hosg = 0
         model.cnn = 0
         model.subspace = 0
         model.vector_size = self.embedding_dim
@@ -96,6 +97,8 @@ class GensimSandbox(object):
             model.cbow = 1
         elif self.method == 'sgns':
             model.sgns = 1
+        elif self.method == 'hosg':
+            model.hosg = 1
         elif self.method == 'cnn':
             model.cnn = 1
         print('Finished building vocab. length of vocab: {}'.format(len(model.vocab)))
@@ -528,7 +531,7 @@ class GensimSandbox(object):
         elif self.method in ['glove']:
             self.method += experiment
             self.train_online_cp_embedding(ndims=2, symmetric=True, nonneg=False, is_glove=True, **kwargs)
-        elif self.method in ['cnn', 'cbow', 'tt', 'subspace', 'sgns']:
+        elif self.method in ['cnn', 'cbow', 'tt', 'subspace', 'sgns', 'hosg']:
             self.method += experiment
             self.train_gensim_embedding()
         elif self.method in ['svd']:
