@@ -1,0 +1,15 @@
+freeway
+Downing_Street
+Oxford_Street
+Route_1
+Interstate_Highway_System
+Piccadilly_Circus
+U.S._Route_66
+Whitehall
+
+Bowery
+Channel_Tunnel
+Baden_Airpark
+King_Abdulaziz_International_Airport
+25_de_Abril_Bridge
+Vauxhall_Bridge

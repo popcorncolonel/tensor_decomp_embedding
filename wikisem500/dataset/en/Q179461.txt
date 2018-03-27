@@ -1,0 +1,13 @@
+Bible
+Gospel
+Genesis
+Book_of_Mormon
+Qur'an
+Exodus
+Old_Testament
+New_Testament
+
+A_Modest_Proposal
+The_Federalist_Papers
+Eurodicautom
+Brockhaus_and_Efron_Encyclopedic_Dictionary

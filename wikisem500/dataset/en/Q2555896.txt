@@ -1,0 +1,13 @@
+Barranquilla
+Cúcuta
+Cali
+Bucaramanga
+Cartagena
+Santa_Marta
+Bogotá
+Medellín
+
+county
+region
+Gilbert_Islands
+Sirte

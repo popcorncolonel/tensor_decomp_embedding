@@ -1,0 +1,15 @@
+wok
+cezve
+tandoor
+cauldron
+pressure_cooker
+deep_fryer
+bain_-_marie
+kettle
+
+food_mill
+colander
+signal_box
+iron_maiden
+Nokia_1110
+Nokia_3210

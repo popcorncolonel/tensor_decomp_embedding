@@ -1,0 +1,15 @@
+Braille
+Brahmi
+Greek
+Cyrillic
+kanji
+Aramaic_alphabet
+cuneiform
+Coptic
+
+writing_system
+NATO_phonetic_alphabet
+quantitative
+vector_graphics
+percentage
+identity_matrix

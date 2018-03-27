@@ -1,0 +1,14 @@
+Graz
+Sankt_Pölten
+Innsbruck
+Villach
+Linz
+Salzburg
+Klagenfurt
+Eisenstadt
+
+district
+Gilbert_Islands
+Murqub_District
+Vilsandi_National_Park
+Rondane

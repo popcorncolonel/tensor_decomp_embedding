@@ -1,0 +1,13 @@
+Sigulda
+Alūksne
+Balvi
+Aizkraukle
+Cēsis
+Kuldīga
+Valka
+Bauska
+
+Riga_District
+Balvi_District
+Gilbert_Islands
+Jafara

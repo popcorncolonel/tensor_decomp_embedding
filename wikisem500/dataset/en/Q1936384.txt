@@ -1,0 +1,15 @@
+algebra
+topology
+number_theory
+geometry
+arithmetic
+set_theory
+linear_algebra
+calculus
+
+Egyptian_mathematics
+Babylonian_mathematics
+intuitionistic_logic
+predicate_logic
+The_Dream_of_the_Fisherman_'s_Wife
+Dürer_'s_Rhinoceros

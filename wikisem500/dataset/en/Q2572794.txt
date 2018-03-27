@@ -1,0 +1,15 @@
+limerick
+terza_rima
+qasida
+tanka
+ghazal
+Ruba'i
+ritornello
+ottava_rima
+
+In_Flanders_Fields
+The_Raven
+Die_schöne_Müllerin
+Ruslan_and_Ludmila
+Ticket_to_Ride
+Child_in_Time

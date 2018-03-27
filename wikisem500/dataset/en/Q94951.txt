@@ -1,0 +1,15 @@
+cuisine_of_Corsica
+Ostkaka
+kroppkakor
+paella
+California_cuisine
+Czech
+Mediterranean_cuisine
+potato_pancake
+
+Turkish_cuisine
+Thai_cuisine
+Korean_cuisine
+lot
+bun
+halva

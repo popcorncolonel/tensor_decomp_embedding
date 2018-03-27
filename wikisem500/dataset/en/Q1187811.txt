@@ -1,0 +1,13 @@
+Bern
+Hanover
+Frankfurt
+Bonn
+Zürich
+Geneva
+Edinburgh
+Munich
+
+Somme
+Deux_-_Sèvres
+department
+voivodeship

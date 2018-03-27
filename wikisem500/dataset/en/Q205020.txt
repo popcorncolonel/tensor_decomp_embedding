@@ -1,0 +1,14 @@
+GNOME
+Common_Desktop_Environment
+K_Desktop_Environment
+Xfce
+MATE
+Cinnamon
+Razor_-_qt
+LXDE
+
+Windows_Aero
+PC_DOS
+FreeDOS
+BOINC
+Gopher

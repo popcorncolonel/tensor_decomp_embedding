@@ -1,0 +1,13 @@
+Trillian
+Kopete
+Irssi
+XChat
+Pidgin
+mIRC
+Miranda_IM
+ChatZilla
+
+Asterisk
+email
+ransomware
+Daemon_Tools

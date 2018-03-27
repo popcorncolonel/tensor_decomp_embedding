@@ -1,0 +1,15 @@
+Stamford_Bridge
+Camp_Nou
+Anfield
+Allianz_Arena
+Estádio_do_Maracanã
+Türk_Telekom_Arena
+Old_Trafford
+San_Siro
+
+Circus_Maximus
+Pokljuka
+Damascus_Gate
+Thames_Barrier
+Priory_of_Sion
+Evangelical

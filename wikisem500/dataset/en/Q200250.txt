@@ -1,0 +1,14 @@
+Karachi
+London
+New_York_City
+Sydney
+Hyderabad
+Dhaka
+Munich
+Cologne
+
+Alhambra
+Krasnobród
+Sędziszów
+autonomous_region
+department

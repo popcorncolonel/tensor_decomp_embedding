@@ -1,0 +1,15 @@
+Setúbal
+Porto
+Coimbra
+Faro
+Lisbon
+Évora
+Funchal
+Guimarães
+
+county
+Sava_Region
+11th_arrondissement_of_Paris
+13th_arrondissement_of_Paris
+Chornomorske
+Simferopol_Raion

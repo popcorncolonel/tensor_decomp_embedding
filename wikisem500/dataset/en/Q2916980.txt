@@ -1,0 +1,15 @@
+joule
+BTU
+erg
+Mtoe
+calorie
+kWh
+MeV
+kiloton
+
+luminosity_of_the_Sun
+basis_point
+apparent_magnitude
+Gini_coefficient
+Rock_in_Rio
+Love_Parade

@@ -1,0 +1,14 @@
+gas_chamber
+guillotine
+hanging
+electric_chair
+lethal_injection
+beheaded
+firing_squad
+stoning
+
+dismemberment
+imprisonment
+Porajmos
+congenital_heart_defect
+myelodysplastic_syndrome

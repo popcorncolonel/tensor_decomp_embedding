@@ -1,0 +1,15 @@
+Browning_Hi_-_Power
+Luger_pistol
+M1911_pistol
+Beretta_92
+Makarov_PM
+Walther_P38
+TT_pistol
+Desert_Eagle
+
+Heckler_&_Koch_USP
+SKS
+Colt_Single_Action_Army
+culverin
+M61_Vulcan
+Schwarzlose_MG_M._07_/_12

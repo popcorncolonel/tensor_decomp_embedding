@@ -1,0 +1,15 @@
+blindfold_chess
+xiangqi
+Chess_boxing
+Chess960
+shogi
+Chaturanga
+rapid
+shatranj
+
+correspondence_chess
+Immortal_Game
+Reversi
+Battleship
+snowball_fight
+bridge

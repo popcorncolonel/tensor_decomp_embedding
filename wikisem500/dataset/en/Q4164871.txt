@@ -1,0 +1,14 @@
+Prime_Minister
+bishop
+king
+Pope
+Tsar
+mayor
+President
+
+spree_killer
+driver
+Satsuma_Domain
+lot
+corduroy
+fleece

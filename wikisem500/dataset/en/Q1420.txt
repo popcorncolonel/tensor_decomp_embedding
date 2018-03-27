@@ -1,0 +1,13 @@
+Volkswagen_Schwimmwagen
+Fiat_Panda
+Volkswagen_Polo
+Peugeot_107
+Toyota_Celica
+GAZ_-_69
+Lancia_037
+Ford_Anglia
+
+F2012
+Ferrari_F10
+bread_machine
+spinning_jenny

@@ -1,0 +1,15 @@
+Tokyo_Station
+Amsterdam_Centraal
+King_'s_Cross_St._Pancras
+Lubyanka
+Baker_Street
+London_Victoria
+Charles_de_Gaulle_–_Étoile
+London_Paddington
+
+Frankfurt
+Berlin
+Penn_Station
+Grand_Central_Terminal
+Pyramid_of_Djoser
+Great_Pyramid_of_Giza

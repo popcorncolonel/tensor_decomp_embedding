@@ -1,0 +1,15 @@
+Beaufort_scale
+caliber
+curie
+gauss
+percentage
+diopter
+speed_of_light
+‰
+
+magnitude
+absolute_magnitude
+weed
+quality
+Nomenclature_of_Territorial_Units_for_Statistics
+chromosome_number

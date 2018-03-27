@@ -1,0 +1,15 @@
+Montpellier
+Nantes
+Strasbourg
+Bordeaux
+Rouen
+Nice
+Toulouse
+Grenoble
+
+department
+Deux_-_Sèvres
+Mukacheve_Raion
+Bakhchysarai_Raion
+Redondo
+Kaskaskia

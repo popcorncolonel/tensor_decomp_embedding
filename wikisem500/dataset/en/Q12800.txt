@@ -1,0 +1,15 @@
+PKM
+MG_17_machine_gun
+ZB_vz_._30
+Parabellum_MG14
+Vickers_._50_machine_gun
+MAC_1934
+Ho_-_103_machine_gun
+Schwarzlose_MG_M._07_/_12
+
+Vickers_machine_gun
+M1919_Browning_machine_gun
+Colt_Single_Action_Army
+Škorpion_vz_._61
+ZU_-_23_-_2
+MK_108_cannon

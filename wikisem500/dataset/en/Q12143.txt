@@ -1,0 +1,15 @@
+CET
+Moscow_Time
+EET
+WET
+EDT
+UTC_−_00:25
+GMT
+PDT
+
+Ottawa
+Mount_Rushmore
+Azawad
+international_waters
+Torbay
+Canterbury

@@ -1,0 +1,13 @@
+Marble_Arch_station
+Great_Portland_Street
+King_'s_Cross_St._Pancras
+Oxford_Circus
+Bank
+Baker_Street
+London_Victoria
+London_Paddington
+
+Budapest
+Schaarbeek
+Penn_Station
+Prague

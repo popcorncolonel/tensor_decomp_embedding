@@ -1,0 +1,15 @@
+Cruiser_Mk_II
+Cruiser_Mk_VIII_Challenger
+BT_-_5
+Crusader_tank
+Comet_tank
+Cruiser_Mk_I
+SOMUA_S35
+Cromwell_tank
+
+T_-_72
+Leopard_1
+Stryker
+M2_Bradley
+ZSU_-_23_-_4
+ZSU_-_57_-_2

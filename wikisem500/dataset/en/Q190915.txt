@@ -1,0 +1,12 @@
+Flydubai
+Germanwings
+Wizz_Air
+Frontier_Airlines
+airBaltic
+Ryanair
+Norwegian_Air_Shuttle
+JetBlue
+
+flag_carrier
+Royal_Caribbean_International
+SpiceJet

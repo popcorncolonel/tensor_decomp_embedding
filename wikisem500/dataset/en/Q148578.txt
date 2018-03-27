@@ -1,0 +1,13 @@
+Spitzer_Space_Telescope
+Hubble_Space_Telescope
+Herschel_Space_Observatory
+Hipparcos
+James_Webb_Space_Telescope
+WMAP
+Kepler
+Chandra_X_-_ray_Observatory
+
+Large_Binocular_Telescope
+Mauna_Kea
+Robben_Island
+Völklingen_Ironworks

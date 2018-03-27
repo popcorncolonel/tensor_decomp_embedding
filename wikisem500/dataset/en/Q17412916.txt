@@ -1,0 +1,15 @@
+Sindar
+Noldor
+Eldar
+Dúnedain
+Rohirrim
+Teleri
+Edain
+Vanyar
+
+Tusken_Raiders
+Yuuzhan_Vong
+Donkey_Kong
+Mickey_Mouse
+Replicators
+generation_ship

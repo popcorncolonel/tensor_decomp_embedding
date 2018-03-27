@@ -1,0 +1,15 @@
+Notepad_+_+
+sed
+vi
+Notepad
+Kate
+Emacs
+Nano
+gedit
+
+CorelDRAW
+Paint_Shop_Pro
+Kaffeine
+Maxima
+gettext
+TeX_Live

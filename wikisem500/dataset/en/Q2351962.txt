@@ -1,0 +1,15 @@
+Adobe_Creative_Suite
+GIMP
+Microsoft_Paint
+Krita
+IrfanView
+Paint.NET
+Adobe_Photoshop_Lightroom
+Adobe_Fireworks
+
+Cinema_4D
+CATIA
+Amaya
+Windows_Movie_Maker
+D_-_Bus
+Lucene

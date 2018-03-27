@@ -1,0 +1,13 @@
+Bank_of_Israel
+Bank_of_England
+Reserve_Bank_of_India
+Bank_of_Japan
+Federal_Reserve
+European_Central_Bank
+Deutsche_Bundesbank
+People_'s_Bank_of_China
+
+Industrial_and_Commercial_Bank_of_China
+Société_Générale
+Microsoft
+Rockstar_North

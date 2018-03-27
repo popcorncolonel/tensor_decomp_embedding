@@ -1,0 +1,15 @@
+MG_08
+DShK
+NSV
+KPV
+Maxim_gun
+MG_131_machine_gun
+Type_92_Heavy_Machine_Gun
+PM_M1910
+
+RPD
+ZB_vz_._26
+Besa_machine_gun
+M1919_Browning_machine_gun
+Paris_Gun
+mitrailleuse

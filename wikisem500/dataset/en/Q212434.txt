@@ -1,0 +1,15 @@
+ice_hockey
+weightlifter
+Nordic_skiing
+modern_pentathlete
+rower
+rhythmic_gymnast
+tug_of_war
+Greco_-_Roman_wrestling
+
+skateboarding
+Twenty20
+excavation
+Twyfelfontein
+roller_hockey
+shinty

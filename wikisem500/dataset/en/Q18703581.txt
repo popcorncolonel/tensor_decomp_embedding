@@ -1,0 +1,15 @@
+Scrabble
+Reversi
+Gomoku
+Go
+Battleship
+Hex
+tic_-_tac_-_toe
+shogi
+
+Rummikub
+Immortal_Game
+Arimaa
+Jenga
+snowball_fight
+sack_race

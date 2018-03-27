@@ -1,0 +1,15 @@
+exponentiation
+cross_product
+binary_operation
+two_'s_complement
+reciprocal
+conjugate_transpose
+triple_product
+complement
+
+quadratic_form
+Stadtholder
+neper
+natural_logarithm
+bisection_method
+Shor_'s_algorithm

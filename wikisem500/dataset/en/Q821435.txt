@@ -1,0 +1,15 @@
+Friedrichshain_-_Kreuzberg
+Charlottenburg_-_Wilmersdorf
+Spandau
+Mitte
+Tempelhof_-_Schöneberg
+Neukölln
+Pankow
+Lichtenberg
+
+Altona
+Hamburg_-_Mitte
+Central_Administrative_Okrug
+South_-_Eastern_Administrative_Okrug
+Bariano
+New_York_metropolitan_area

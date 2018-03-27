@@ -1,0 +1,15 @@
+City_of_London
+Downtown_Los_Angeles
+Midtown_Manhattan
+Canary_Wharf
+Central
+Lower_Manhattan
+Financial_District
+La_Défense
+
+Old_Riga
+Embraer_EMB_202_Ipanema
+Wikipedia_community
+Mozilla
+Pannonhalma_Archabbey
+Cîteaux

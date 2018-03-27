@@ -1,0 +1,15 @@
+gnome
+unicorn
+Cyclops
+centaur
+Minotaur
+dragon
+dryad
+fairy
+
+USS
+Starship_Enterprise
+Donkey_Kong
+Mario
+Slovio
+Toki_Pona

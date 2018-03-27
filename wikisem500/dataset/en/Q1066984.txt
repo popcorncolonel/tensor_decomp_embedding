@@ -1,0 +1,13 @@
+City_of_London
+Frankfurt
+Manhattan
+London
+Stuttgart
+Dhaka
+Moscow_International_Business_Center
+Munich
+
+Buellton
+Krasnobród
+raion
+voivodeship

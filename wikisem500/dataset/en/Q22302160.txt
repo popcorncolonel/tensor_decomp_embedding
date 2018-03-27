@@ -1,0 +1,15 @@
+train
+aircraft
+passenger
+shares
+vehicle
+human
+countries
+pilot
+
+canoe
+motorboat
+Disney_Characters
+Medal
+Tor
+FidoNet

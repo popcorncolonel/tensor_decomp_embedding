@@ -1,0 +1,15 @@
+sed
+device_driver
+malware
+OneDrive
+KOffice
+Google_Earth
+Picasa
+spreadsheet
+
+Apertium
+The_Burning_Crusade
+futures_contract
+European_Charter_for_Regional_or_Minority_Languages
+Archean
+norm

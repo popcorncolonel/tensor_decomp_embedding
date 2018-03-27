@@ -1,0 +1,15 @@
+lightning_rod
+hygrometer
+rain_gauge
+altimeter
+LIDAR
+barometer
+weathervane
+anemometer
+
+viscometer
+pitot_tube
+plunger
+laser
+AWACS
+structural_system

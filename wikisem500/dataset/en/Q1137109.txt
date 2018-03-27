@@ -1,0 +1,13 @@
+Activision
+Sierra_Entertainment
+Blizzard_Entertainment
+Nintendo
+Valve_Corporation
+Konami
+Bethesda_Softworks
+Electronic_Arts
+
+HarperCollins
+Random_House
+Death_Row_Records
+Sun_Records

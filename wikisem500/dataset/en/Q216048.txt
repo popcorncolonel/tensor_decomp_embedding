@@ -1,0 +1,13 @@
+ice_hockey
+hockey
+bandy
+baseball
+cricket
+handball
+bobsled
+curler
+
+harness_racing
+Dancesport
+yoga
+racing_driver

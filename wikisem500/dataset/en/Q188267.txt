@@ -1,0 +1,13 @@
+reactive_programming
+functional_programming
+REST
+object_-_oriented_programming_language
+procedural
+functional_reactive_programming
+MapReduce
+HATEOAS
+
+French_braid
+tartan
+Beast_of_Gévaudan
+Jingtai_Emperor

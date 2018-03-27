@@ -1,0 +1,15 @@
+mangonel
+onager
+battering_ram
+trebuchet
+ballista
+corvus
+scorpio
+siege_tower
+
+Moncada_Barracks
+Acropolis_of_Athens
+autoclave
+playing_card
+lorgnette
+armband

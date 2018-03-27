@@ -1,0 +1,15 @@
+Düsseldorf
+Bonn
+Kiel
+Dortmund
+Stuttgart
+Uetersen
+Aachen
+Heidelberg
+
+Neckar_-_Odenwald_-_Kreis
+independent_city
+DIN
+Max_Planck_Society
+London
+Greater_Tokyo_Area

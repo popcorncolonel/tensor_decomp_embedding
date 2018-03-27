@@ -1,0 +1,15 @@
+Kunming
+Nanchang
+Suzhou
+Ürümqi
+Lanzhou
+Zhengzhou
+Lhasa
+Changsha
+
+Linxia_Hui_Autonomous_Prefecture
+Qiannan_Buyei_and_Miao_Autonomous_Prefecture
+Sha_Tin_District
+Sai_Kung_District
+Wanzhou
+Baoshan

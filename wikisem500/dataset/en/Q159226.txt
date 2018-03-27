@@ -1,0 +1,13 @@
+acetylene
+1_-_Butyne
+erlotinib
+ponatinib
+methylacetylene
+diacetylene
+efavirenz
+vinylacetylene
+
+xylene
+octene
+methane
+heptane

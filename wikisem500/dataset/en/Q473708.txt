@@ -1,0 +1,15 @@
+Apple_II
+MSX
+Amiga
+Amstrad_CPC
+Atari_ST
+Apple_Lisa
+Altair_8800
+Commodore_64
+
+FL_Studio
+GarageBand
+DuckDuckGo
+Colossus_computer
+iPod_Touch
+Nexus_10

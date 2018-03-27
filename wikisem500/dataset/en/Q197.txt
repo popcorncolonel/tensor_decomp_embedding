@@ -1,0 +1,15 @@
+Tupolev_Tu_-_144
+fighter_aircraft
+B_-_29_Superfortress
+U_-_2
+F_/_A_-_18_Hornet
+glider
+Messerschmitt_Me_262
+B_-_17_Flying_Fortress
+
+autogyro
+gyrodyne
+Aero_L_-_39_Albatros
+Mitsubishi_F_-_1
+trainer
+blimp

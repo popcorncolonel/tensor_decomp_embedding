@@ -1,0 +1,15 @@
+CAC_40
+S_&_P_500
+NASDAQ_-_100
+Nikkei_225
+DAX
+FTSE_100_Index
+Dow_Jones_Industrial_Average
+WIG30
+
+Human_Development_Index
+GDP
+Prandtl_number
+Gini_coefficient
+Nomenclature_of_Territorial_Units_for_Statistics
+RFLP

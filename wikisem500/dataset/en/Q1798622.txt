@@ -1,0 +1,15 @@
+Red_Sea_Governorate
+Minya_Governorate
+Giza_Governorate
+Cairo
+North_Sinai
+Alexandria
+Aswan
+South_Sinai
+
+Somme
+Deux_-_Sèvres
+SAP_Kosovo
+Latgale
+international_waters
+Thirteen_Colonies

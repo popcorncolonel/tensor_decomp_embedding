@@ -1,0 +1,15 @@
+Ternopil
+Cherkasy
+Donetsk
+Vinnytsia
+Chernihiv
+Kherson
+Lutsk
+Uzhhorod
+
+Autonomous_Republic_of_Crimea
+Bratslav
+Sirte
+Murqub_District
+Bernau
+Siegen

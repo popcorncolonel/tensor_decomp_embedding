@@ -1,0 +1,15 @@
+Iberian_Peninsula
+Italian_Peninsula
+Balkans
+Crimea
+Arabia
+Kamchatka
+Sinai
+Horn_of_Africa
+
+Albor_Tholus
+Columbia_Plateau
+VCD
+SVCD
+Levantine_Sea
+Laptev_Sea

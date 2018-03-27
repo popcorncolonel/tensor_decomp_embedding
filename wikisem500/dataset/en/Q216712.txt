@@ -1,0 +1,15 @@
+Waikato
+Bay_of_Plenty
+Canterbury
+Hawke_'s_Bay
+West_Coast
+Otago
+Southland
+Northland
+
+Kaikoura
+Rotorua
+Gilbert_Islands
+Murqub_District
+Vibo_Valentia
+Verbano_-_Cusio_-_Ossola

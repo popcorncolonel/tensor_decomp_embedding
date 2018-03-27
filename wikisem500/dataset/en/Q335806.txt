@@ -1,0 +1,15 @@
+Bengali
+Gurmukhi
+Burmese_script
+Devanagari
+Ge'ez
+Kannada
+Telugu
+Tamil
+
+Russian_alphabet
+Belarusian
+Ugaritic_alphabet
+Mongolian_script
+obelus
+±

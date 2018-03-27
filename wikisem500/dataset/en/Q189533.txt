@@ -1,0 +1,14 @@
+honorary_doctorate
+professor
+Bachelor_of_Science
+Magister
+Doctor_of_Laws
+Candidate_of_Sciences
+Master_of_Arts
+docent
+
+Director
+philosophy_of_education
+calculus
+skald
+child_actor

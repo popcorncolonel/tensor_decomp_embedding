@@ -1,0 +1,13 @@
+Plaines_Wilhems
+Grand_Port
+Pamplemousses
+Moka
+Rivière_Noire
+Flacq
+Port_Louis
+Savanne
+
+Diana_Region
+region
+mohalla
+countries

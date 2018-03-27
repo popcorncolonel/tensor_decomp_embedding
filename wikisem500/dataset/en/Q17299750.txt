@@ -1,0 +1,15 @@
+World_Open
+Malta_Grand_Prix
+Canadian_Masters
+Dubai_Classic
+Welsh_Professional_Championship
+Welsh_Open
+Thailand_Masters
+British_Open
+
+World_Cup
+World_Touring_Car_Championship
+Taça_da_Liga
+Côte_d'Ivoire_Premier_Division
+Fukuoka_Marathon
+Premier_League

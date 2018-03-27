@@ -1,0 +1,15 @@
+trident
+brass_knuckles
+pilum
+bayonet
+tomahawk
+foil
+axe
+machete
+
+tonfa
+bolas
+sieve
+laser_diode
+Heckler_&_Koch_USP
+Glock_18

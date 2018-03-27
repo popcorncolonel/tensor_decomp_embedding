@@ -1,0 +1,14 @@
+Angus
+Fife
+Outer_Hebrides
+Glasgow
+Shetland
+Aberdeen
+Edinburgh
+Orkney
+
+county
+Ceredigion
+Powys
+Lemmenjoki_National_Park
+Rondane

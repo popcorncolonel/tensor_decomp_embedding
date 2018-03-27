@@ -1,0 +1,15 @@
+catalyzes
+photolysis
+elimination_reaction
+neutralization
+oxidation
+degradation
+Diels_-_Alder_reaction
+chlorination
+
+Haber_process
+Fischer_-_Tropsch_process
+benchmarking
+Bessemer_process
+spawning
+mutation

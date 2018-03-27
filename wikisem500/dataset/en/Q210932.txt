@@ -1,0 +1,15 @@
+Tupolev_Tu_-_154
+Junkers_Ju_52
+Lockheed_L_-_1011
+Baade_152
+de_Havilland_Comet
+Comac_C919
+Aviation_Traders_Carvair
+Junkers_F._13
+
+Bombardier_CRJ700
+Embraer_EMB_202_Ipanema
+Mitsubishi_F_-_1
+Kawasaki_T_-_4
+military_aircraft
+bomber

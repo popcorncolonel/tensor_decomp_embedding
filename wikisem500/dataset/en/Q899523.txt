@@ -1,0 +1,15 @@
+Java
+Smalltalk
+Lua
+Python
+Ruby
+Dart
+C_#
+Object_Pascal
+
+Brainfuck
+Ada
+SPARQL
+SQL
+World_Digital_Library
+Library_of_Ashurbanipal

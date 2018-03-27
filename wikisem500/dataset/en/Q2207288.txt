@@ -1,0 +1,15 @@
+pottery
+pianist
+herder
+farmer
+fishermen
+butcher
+carpenter
+barber
+
+spree_killer
+F
+norm
+Chōshū
+TNT
+media_agency

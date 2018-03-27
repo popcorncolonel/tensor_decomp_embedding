@@ -1,0 +1,15 @@
+Madison_Square_Garden
+Walt_Disney_Concert_Hall
+Olympia
+Kodak_Theatre
+Carnegie_Hall
+Auditorio_de_Tenerife
+Royal_Albert_Hall
+Palau_de_la_Música_Catalana
+
+CBGB
+Buena_Vista_Social_Club
+Arena_di_Verona
+Barbican_Centre
+RMS
+HMHS

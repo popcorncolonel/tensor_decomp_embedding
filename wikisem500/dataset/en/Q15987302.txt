@@ -1,0 +1,15 @@
+notary
+jurist
+solicitor
+barrister
+prosecutor
+lawyer
+judge
+coroner
+
+character_actor
+paparazzi
+guitarist
+contract_killer
+Rudolf_Höss
+Chenghua_Emperor

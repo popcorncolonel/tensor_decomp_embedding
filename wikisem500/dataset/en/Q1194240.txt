@@ -1,0 +1,15 @@
+military_science_fiction
+post_-_apocalyptic
+hard_science_fiction
+soft_science_fiction
+cyberpunk
+steampunk
+space_opera
+science_fantasy
+
+dark_fantasy
+Bella_Swan
+war_novel
+bestiary
+Swing
+Daemon_Tools

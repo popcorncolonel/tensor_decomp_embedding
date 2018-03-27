@@ -1,0 +1,15 @@
+Deutsche_Bahn
+ThyssenKrupp
+Continental_AG
+Audi
+Porsche
+Deutsche_Telekom
+Daimler_AG
+Siemens
+
+German_Academy_of_Sciences_Leopoldina
+mutual
+NorrlandsOperan
+BenQ
+North_American_Free_Trade_Agreement
+Eurasian_Economic_Community

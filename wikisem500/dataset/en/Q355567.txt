@@ -1,0 +1,15 @@
+Sultan
+king
+Pharaoh
+knight
+samurai
+Duke
+Emperor
+Byzantine_Emperor
+
+Prime_Minister_of_Czechoslovakia
+Prime_Minister_of_Belize
+driver
+guitarist
+Secretary_of_Labor
+Maharaja

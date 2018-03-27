@@ -1,0 +1,15 @@
+Sichuan
+Gansu
+Liaoning
+Jiangsu
+Yunnan
+Heilongjiang
+Hainan
+Guangdong
+
+Eastern_Province
+Northern_Province
+Mukacheve_Raion
+Bakhchysarai_Raion
+Abisko_National_Park
+Sarek_National_Park

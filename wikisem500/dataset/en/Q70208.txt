@@ -1,0 +1,15 @@
+Bern
+Lugano
+Winterthur
+Zürich
+Geneva
+Basel
+Lausanne
+Lucerne
+
+Aljezur
+Chaidari
+autonomous_region
+Bakhchysarai_Raion
+Vianden
+Redange

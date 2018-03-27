@@ -1,0 +1,15 @@
+pluperfect
+present_tense
+imperfect
+future_tense
+past_tense
+future_perfect
+preterite
+present_perfect
+
+perfect
+agent
+weed
+commutative
+DOC
+domain_name

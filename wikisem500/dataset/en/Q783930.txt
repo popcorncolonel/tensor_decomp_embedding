@@ -1,0 +1,15 @@
+Loznica
+Novi_Beograd
+Apatin
+Zrenjanin
+Temerin
+Zemun
+Leskovac
+Sremski_Karlovci
+
+region
+North_Tipperary
+12th_arrondissement_of_Paris
+11th_arrondissement_of_Paris
+SSR_Abkhazia
+Simferopol_Raion

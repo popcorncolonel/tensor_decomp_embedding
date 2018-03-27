@@ -1,0 +1,15 @@
+Sochi
+Saratov
+Novosibirsk
+Podolsk
+Volgograd
+Vladivostok
+Kaliningrad
+Paltoga
+
+Alavus
+Line_Islands
+West_Berlin
+international_waters
+Vicenza
+Venice

@@ -1,0 +1,15 @@
+iTunes
+Apple_TV
+QuickTime
+VLC_media_player
+Winamp
+Adobe_Flash_Player
+Windows_Media_Player
+MPlayer
+
+iMovie
+Adobe_Premiere_Pro
+ransomware
+iWeb
+gettext
+GNU_C_Library

@@ -1,0 +1,15 @@
+Wake_-_on_-_LAN
+S_/_PDIF
+IEEE_-_488
+H._323
+POP3
+HDMI
+DICOM
+CAN
+
+RTCP
+BitTorrent
+Kolomenskoye
+Archduchy_of_Austria
+GMT
+UTC

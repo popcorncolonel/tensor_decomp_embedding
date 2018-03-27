@@ -1,0 +1,15 @@
+shipbuilding
+shopping
+filmmaker
+horticulture
+mining
+robotics
+manufacturing
+automotive
+
+software_development
+steelmaking
+storm
+1970_Bhola_cyclone
+Steamboat_Willie
+Ghosts

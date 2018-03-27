@@ -1,0 +1,15 @@
+momentum
+electric_dipole_moment
+magnetization
+angular_momentum
+current_density
+velocity
+torque
+impulse
+
+stimuli
+action
+plasticity
+electron_configuration
+commutative
+range

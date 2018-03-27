@@ -1,0 +1,14 @@
+sed
+cd
+vi
+AWK
+cat
+grep
+mv
+chmod
+
+netstat
+NOD32
+Avast_Antivirus
+Adobe_Fireworks
+FreeHand

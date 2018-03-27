@@ -1,0 +1,15 @@
+Madsen_machine_gun
+DT_machine_gun
+FN_Minimi
+RPD
+Browning_Automatic_Rifle
+Bren_light_machine_gun
+RPK
+ZB_vz_._26
+
+MG_131_machine_gun
+Type_92_Heavy_Machine_Gun
+Besa_machine_gun
+M1919_Browning_machine_gun
+Ordnance_QF_2_pounder
+culverin

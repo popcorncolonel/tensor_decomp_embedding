@@ -1,0 +1,15 @@
+NetBeans
+Gambas
+KDevelop
+Eclipse
+Lazarus
+Visual_Studio
+Delphi
+Dev_-_C_+_+
+
+OpenGL
+debugger
+CorelDRAW
+iPhoto
+Nano
+sed

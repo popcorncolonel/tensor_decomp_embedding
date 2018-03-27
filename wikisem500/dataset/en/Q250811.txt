@@ -1,0 +1,15 @@
+Harbin
+Guangzhou
+Chengdu
+Wuhan
+Xi'an
+Nanjing
+Shenzhen
+Hangzhou
+
+Daxing'anling_Prefecture
+Hotan_Prefecture
+Korla
+Yarkand
+Songjiang_District
+Jiading

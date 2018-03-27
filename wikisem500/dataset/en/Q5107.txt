@@ -1,0 +1,13 @@
+South_America
+Eurasia
+Africa
+Europe
+Asia
+Antarctica
+North_America
+Oceania
+
+Kufra
+El_Oued
+National_Gallery
+Shinjuku_Station

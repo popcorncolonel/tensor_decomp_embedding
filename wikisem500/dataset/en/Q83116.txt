@@ -1,0 +1,15 @@
+West_Flanders
+Hainaut
+Limburg
+Luxembourg
+Antwerp
+Liège
+Flemish_Brabant
+East_Flanders
+
+Seine_-_Maritime
+Tarn
+Thirteen_Colonies
+international_waters
+international_waters
+SAP_Kosovo

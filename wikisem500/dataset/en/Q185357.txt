@@ -1,0 +1,15 @@
+freezing
+vaporization
+boiling
+condensation
+melting
+deposition
+evaporation
+sublimation
+
+Rankine_cycle
+isothermal
+Great_Pacific_Garbage_Patch
+Gulf_Stream
+Battle_of_Arsuf
+Battle_of_Shiloh

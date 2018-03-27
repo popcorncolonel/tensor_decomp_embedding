@@ -1,0 +1,15 @@
+FTP
+TCP
+UDP
+HTTP
+IP
+IRC
+BitTorrent
+DNS
+
+Wake_-_on_-_LAN
+X._500
+AES
+Unicode
+European_emission_standards
+ISO_639

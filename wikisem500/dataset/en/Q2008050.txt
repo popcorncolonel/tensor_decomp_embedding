@@ -1,0 +1,14 @@
+Pogradec
+Korçë
+Gjirokastër
+Sarandë
+Krujë
+Fier
+Vlorë
+Kukës
+
+Vlorë_District
+Mukacheve_Raion
+autonomous_region
+county
+South_Tipperary

@@ -1,0 +1,15 @@
+isotype
+binomial_name
+biological_nomenclature
+trinomial_name
+syntype
+lectotype
+holotype
+paratype
+
+IUPAC_nomenclature_of_organic_chemistry
+INN
+tuning
+meconium
+blazon
+turntablist

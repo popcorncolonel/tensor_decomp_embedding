@@ -1,0 +1,15 @@
+°_C
+Newton_scale
+Rankine
+Rømer
+Delisle_scale
+Réaumur_scale
+K
+Fahrenheit
+
+ppi
+Bohr_magneton
+absolute_magnitude
+population_density
+Love_Parade
+BBC_Proms

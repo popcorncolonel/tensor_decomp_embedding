@@ -1,0 +1,15 @@
+Goa'uld
+Asgard
+vampire
+squib
+elves
+orc
+ogre
+Wraith
+
+Nessus
+Pholus
+USS
+Starship_Enterprise
+Angmar
+Harad

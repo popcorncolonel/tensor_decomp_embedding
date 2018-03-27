@@ -1,0 +1,13 @@
+Karlovy_Vary
+Liberec
+Pardubice
+Olomouc
+Ostrava
+Plzeň
+Brno
+České_Budějovice
+
+Tarn
+Deux_-_Sèvres
+department
+voivodeship

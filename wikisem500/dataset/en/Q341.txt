@@ -1,0 +1,13 @@
+Debian
+GIMP
+PHP
+AutoWikiBrowser
+Python
+MediaWiki
+Perl
+Firefox
+
+CorelDRAW
+iPhoto
+ransomware
+iPhoto

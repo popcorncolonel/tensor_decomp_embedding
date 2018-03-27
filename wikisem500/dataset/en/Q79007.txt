@@ -1,0 +1,15 @@
+Karakoram_Highway
+Oxford_Street
+Wall_Street
+Broadway
+Pan_-_American_Highway
+Unter_den_Linden
+Whitehall
+Appian_Way
+
+M25
+A
+Darjeeling_Himalayan_Railway
+Bowery
+Simplon_Tunnel
+Gotthard_Rail_Tunnel

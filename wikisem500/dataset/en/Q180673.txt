@@ -1,0 +1,15 @@
+Cornwall
+Cumbria
+Isle_of_Wight
+Essex
+Hampshire
+Kent
+Surrey
+Devon
+
+county
+Pembrokeshire
+SAP_Kosovo
+international_waters
+Isles_of_Scilly
+North_Somerset

@@ -1,0 +1,15 @@
+FTP
+TCP
+UDP
+SMTP
+IP
+Telnet
+DNS
+ICMP
+
+FIPS_place_code
+AES
+commandry
+Peterhof_Palace
+GMT
+Olympiad

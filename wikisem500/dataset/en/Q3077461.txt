@@ -1,0 +1,15 @@
+forest
+taiga
+grass
+Pampas
+prairie
+mangrove
+jungle
+steppe
+
+Teutoburg_Forest
+Kaya_(_Mijikenda_)
+Highlands_of_Iceland
+highland
+Jurassic_Coast
+Challenger_Deep

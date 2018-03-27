@@ -1,0 +1,14 @@
+Palais_Garnier
+Royal_Opera_House
+La_Fenice
+Auditorio_de_Tenerife
+La_Scala
+Opéra_Bastille
+Sydney_Opera_House
+Mariinsky_Theatre
+
+Théâtre_antique_d'Orange
+Torre_de_Cristal
+National_Congress
+Alexander_Nevsky_Lavra
+Iviron_monastery

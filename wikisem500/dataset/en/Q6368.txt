@@ -1,0 +1,15 @@
+Google_Chrome
+Internet_Explorer
+Safari
+Microsoft_Edge
+Chromium
+Konqueror
+Firefox
+Opera
+
+Notepad
+Final_Cut_Pro
+graphics_software
+iPhoto
+gettext
+Lucene

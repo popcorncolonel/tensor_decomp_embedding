@@ -1,0 +1,15 @@
+fear
+hatred
+love
+happiness
+envy
+hope
+sadness
+anger
+
+magnitude
+Gini_coefficient
+redistribution_of_wealth
+drug_addiction
+Summa_Theologica
+Bible_translation

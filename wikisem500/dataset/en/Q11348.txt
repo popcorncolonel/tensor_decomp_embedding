@@ -1,0 +1,13 @@
+Stadtholder
+quadratic_form
+factorial
+probability_mass_function
+nth_root
+wavelet
+Kronecker_delta
+odd
+
+neper
+dB
+Nikon_D5100
+DSLR

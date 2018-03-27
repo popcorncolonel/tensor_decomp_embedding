@@ -1,0 +1,15 @@
+teacher
+astronaut
+actor
+priest
+physician
+poet
+scientist
+writer
+
+goaltender
+centre
+reality
+lot
+corduroy
+satin
